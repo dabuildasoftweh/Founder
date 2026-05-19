@@ -5,9 +5,12 @@ import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
   XAxis, YAxis, Tooltip, CartesianGrid, ScatterChart, Scatter, ZAxis,
 } from "recharts";
+import { useRouter } from "next/navigation";
 import { supabase, categoriseIdea, opportunityScore, kellyHours, portfolioHealth } from "@/lib/supabase";
 import { MORNING_QUESTIONS, generateTodoFromIdeas, getAdvisorInsight } from "@/lib/advisor";
+import { getSession, getOrg, getMembers, getActivity, logActivity, inviteMember, createOrg } from "@/lib/auth";
 import type { Idea, DailyLog, Goal, FounderProfile, TodoItem } from "@/lib/supabase";
+import type { OrgRow, Member } from "@/lib/auth";
 
 // ── Tokens ────────────────────────────────────────────────────────────────────
 const BG      = "#07071A";
@@ -23,7 +26,7 @@ const P = {
   blue: "#3B82F6",   gold: "#FFD700",
 };
 
-const TABS = ["Advisor", "Today", "Idea Lab", "Overview", "Daily Log", "Goals", "Profile"] as const;
+const TABS = ["Advisor", "Today", "Idea Lab", "Overview", "Daily Log", "Goals", "Team", "Profile"] as const;
 type Tab = typeof TABS[number];
 
 const TAB_ICONS: Record<Tab, string> = {
@@ -33,8 +36,12 @@ const TAB_ICONS: Record<Tab, string> = {
   "Overview": "📊",
   "Daily Log":"📝",
   "Goals":    "🏁",
+  "Team":     "👥",
   "Profile":  "⚙️",
 };
+
+const PERSONAL_TABS: Tab[] = ["Advisor", "Today", "Profile"];
+const ORG_TABS:      Tab[] = ["Idea Lab", "Overview", "Daily Log", "Goals", "Team"];
 
 const CAT: Record<string, { label: string; color: string; desc: string }> = {
   asymmetric: { label: "Asymmetric", color: P.emerald, desc: "High upside, low risk" },
@@ -213,7 +220,17 @@ function HUD({ todos, checked, goals }: { todos: TodoItem[]; checked: Set<number
 
 // ── MAIN ──────────────────────────────────────────────────────────────────────
 export default function App() {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>("Advisor");
+
+  // ── Auth & org ──
+  const [authUser, setAuthUser] = useState<{ id: string; email?: string } | null>(null);
+  const [org,      setOrg]      = useState<OrgRow | null>(null);
+  const [members,  setMembers]  = useState<Member[]>([]);
+  const [activity, setActivity] = useState<Record<string, unknown>[]>([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteSending, setInviteSending] = useState(false);
+  const [inviteDone, setInviteDone] = useState(false);
 
   const [ideas,   setIdeas]   = useState<Idea[]>([]);
   const [logs,    setLogs]    = useState<DailyLog[]>([]);
@@ -239,72 +256,112 @@ export default function App() {
   const [advisorLoading, setAdvisorLoading] = useState(false);
   const [checkedTodos,   setCheckedTodos]   = useState<Set<number>>(new Set());
 
-  // ── Advisor ──
+  // ── Advisor chat ──
+  const [advisorView,  setAdvisorView]  = useState<"chat" | "dump" | "library">("chat");
   const [chatMessages, setChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [chatInput,    setChatInput]    = useState("");
   const [chatLoading,  setChatLoading]  = useState(false);
-  const [infoDump,     setInfoDump]     = useState("");
-  const [infoDumpOpen, setInfoDumpOpen] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  const load = useCallback(async () => {
+  // ── Info dump ──
+  const [dumpText,        setDumpText]        = useState("");
+  const [dumpEnergy,      setDumpEnergy]      = useState(7);
+  const [dumpClarity,     setDumpClarity]     = useState(7);
+  const [dumpProcessing,  setDumpProcessing]  = useState(false);
+  const [dumpExtractions, setDumpExtractions] = useState<Record<string, unknown>[]>([]);
+  const [dumpMeta,        setDumpMeta]        = useState<{ dominant_theme?: string; mental_state_note?: string; do_summary?: string; dont_summary?: string } | null>(null);
+  const [savedDumps,      setSavedDumps]      = useState<Record<string, unknown>[]>([]);
+  const [worksItems,      setWorksItems]      = useState<Record<string, unknown>[]>([]);
+  const [doesntItems,     setDoesntItems]     = useState<Record<string, unknown>[]>([]);
+
+  const load = useCallback(async (uid: string, orgId: string) => {
     setLoading(true);
-    const [iR, lR, gR, pR, planR] = await Promise.all([
-      supabase.from("ideas").select("*").order("created_at", { ascending: false }),
-      supabase.from("daily_logs").select("*").order("date", { ascending: false }).limit(30),
-      supabase.from("goals").select("*").order("created_at", { ascending: false }),
-      supabase.from("founder_profile").select("*").limit(1).maybeSingle(),
-      supabase.from("daily_plans").select("*").eq("date", new Date().toISOString().split("T")[0]).maybeSingle(),
+    const today = new Date().toISOString().split("T")[0];
+    const [iR, lR, gR, pR, planR, dumpR, worksR, doesntR] = await Promise.all([
+      supabase.from("ideas").select("*").eq("org_id", orgId).order("created_at", { ascending: false }),
+      supabase.from("daily_logs").select("*").eq("org_id", orgId).order("date", { ascending: false }).limit(30),
+      supabase.from("goals").select("*").eq("org_id", orgId).order("created_at", { ascending: false }),
+      supabase.from("founder_profile").select("*").eq("user_id", uid).limit(1).maybeSingle(),
+      supabase.from("daily_plans").select("*").eq("user_id", uid).eq("date", today).maybeSingle(),
+      supabase.from("info_dumps").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(20),
+      supabase.from("extracted_items").select("*").eq("user_id", uid).eq("filed_as", "works").order("created_at", { ascending: false }),
+      supabase.from("extracted_items").select("*").eq("user_id", uid).eq("filed_as", "doesnt_work").order("created_at", { ascending: false }),
     ]);
-    if (iR.data)    setIdeas(iR.data);
-    if (lR.data)    setLogs(lR.data);
-    if (gR.data)    setGoals(gR.data);
-    if (pR.data)    { setProfile(pR.data); setProfileForm(pR.data); }
-    if (planR.data) {
+    if (iR.data)     setIdeas(iR.data);
+    if (lR.data)     setLogs(lR.data);
+    if (gR.data)     setGoals(gR.data);
+    if (pR.data)     { setProfile(pR.data); setProfileForm(pR.data); }
+    if (planR.data)  {
       if (planR.data.morning_answers) setMorningAnswers(planR.data.morning_answers);
       if (planR.data.todo_items)      { setTodayTodos(planR.data.todo_items); setTodoGenerated(true); }
     }
+    if (dumpR.data)   setSavedDumps(dumpR.data);
+    if (worksR.data)  setWorksItems(worksR.data);
+    if (doesntR.data) setDoesntItems(doesntR.data);
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    getSession().then(async session => {
+      if (!session) { router.push("/login"); return; }
+      setAuthUser(session.user);
+      let currentOrg = await getOrg(session.user.id);
+      // If no org yet, create a default one so the app works
+      if (!currentOrg) {
+        currentOrg = await createOrg("My Workspace", session.user.id);
+      }
+      if (currentOrg) {
+        setOrg(currentOrg);
+        const [m, a] = await Promise.all([getMembers(currentOrg.id), getActivity(currentOrg.id)]);
+        setMembers(m);
+        setActivity(a);
+        load(session.user.id, currentOrg.id);
+      }
+    });
+  }, [router, load]);
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
   const saveIdea = async () => {
-    if (!ideaForm.title.trim()) return;
+    if (!ideaForm.title.trim() || !authUser || !org) return;
     setIdeaSaving(true);
     const category = categoriseIdea(ideaForm.upside, ideaForm.downside, ideaForm.effort);
-    await supabase.from("ideas").insert({ ...ideaForm, category });
+    const score    = opportunityScore(ideaForm.upside, ideaForm.downside, ideaForm.effort);
+    await supabase.from("ideas").insert({ ...ideaForm, category, user_id: authUser.id, org_id: org.id });
+    await logActivity(org.id, authUser.id, "idea_added", "idea", { title: ideaForm.title, score, category });
     setIdeaForm({ title: "", description: "", upside: 5, downside: 5, effort: 5 });
-    await load(); setIdeaSaving(false);
+    await load(authUser.id, org.id); setIdeaSaving(false);
   };
 
   const saveLog = async () => {
+    if (!authUser || !org) return;
     setLogSaving(true);
-    await supabase.from("daily_logs").insert({ ...logForm, date: new Date().toISOString().split("T")[0] });
-    // Auto-update matching goals
+    const date = new Date().toISOString().split("T")[0];
+    await supabase.from("daily_logs").insert({ ...logForm, date, user_id: authUser.id, org_id: org.id });
     if (logForm.outcome_revenue > 0) {
+      await logActivity(org.id, authUser.id, "revenue_logged", "log", { amount: logForm.outcome_revenue });
       const revGoals = goals.filter(g => g.category === "revenue");
       await Promise.all(revGoals.map(g =>
         supabase.from("goals").update({ current_value: (g.current_value ?? 0) + logForm.outcome_revenue }).eq("id", g.id!)
       ));
     }
     if (logForm.outcome_followers > 0) {
+      await logActivity(org.id, authUser.id, "followers_logged", "log", { amount: logForm.outcome_followers });
       const audGoals = goals.filter(g => g.category === "audience");
       await Promise.all(audGoals.map(g =>
         supabase.from("goals").update({ current_value: (g.current_value ?? 0) + logForm.outcome_followers }).eq("id", g.id!)
       ));
     }
     setLogForm({ output_type: "content", output_description: "", output_quantity: 1, output_unit: "hours", outcome_revenue: 0, outcome_followers: 0, notes: "" });
-    await load(); setLogSaving(false);
+    await load(authUser.id, org.id); setLogSaving(false);
   };
 
   const saveGoal = async () => {
-    if (!goalForm.title.trim()) return;
+    if (!goalForm.title.trim() || !authUser || !org) return;
     setGoalSaving(true);
-    await supabase.from("goals").insert(goalForm);
+    await supabase.from("goals").insert({ ...goalForm, user_id: authUser.id, org_id: org.id });
+    await logActivity(org.id, authUser.id, "goal_added", "goal", { title: goalForm.title, target: goalForm.target_value });
     setGoalForm({ title: "", category: "revenue", target_value: 0, current_value: 0, unit: "£", deadline: "" });
-    await load(); setGoalSaving(false);
+    await load(authUser.id, org.id); setGoalSaving(false);
   };
 
   const updateGoalProgress = async (id: string, value: number) => {
@@ -318,14 +375,55 @@ export default function App() {
   };
 
   const saveProfile = async () => {
+    if (!authUser) return;
     setProfileSaving(true);
     if (profile?.id) {
       await supabase.from("founder_profile").update({ ...profileForm }).eq("id", profile.id);
     } else {
-      const { data } = await supabase.from("founder_profile").insert({ ...profileForm }).select().single();
+      const { data } = await supabase.from("founder_profile").insert({ ...profileForm, user_id: authUser.id }).select().single();
       if (data) setProfile(data);
     }
-    await load(); setProfileSaving(false);
+    if (org) await load(authUser.id, org.id); setProfileSaving(false);
+  };
+
+  const sendInvite = async () => {
+    if (!inviteEmail.trim() || !org) return;
+    setInviteSending(true);
+    await inviteMember(org.id, inviteEmail);
+    setInviteEmail(""); setInviteDone(true); setInviteSending(false);
+    setTimeout(() => setInviteDone(false), 4000);
+  };
+
+  const processDump = async () => {
+    if (!dumpText.trim() || !authUser) return;
+    setDumpProcessing(true);
+    try {
+      const res  = await fetch("/api/extract-dump", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: dumpText, energy: dumpEnergy, clarity: dumpClarity }) });
+      const data = await res.json();
+      setDumpExtractions(data.items ?? []);
+      setDumpMeta({ dominant_theme: data.dominant_theme, mental_state_note: data.mental_state_note, do_summary: data.do_summary, dont_summary: data.dont_summary });
+      // Save raw dump
+      await supabase.from("info_dumps").insert({ user_id: authUser.id, org_id: org?.id, raw_text: dumpText, mental_state_energy: dumpEnergy, mental_state_clarity: dumpClarity, dominant_theme: data.dominant_theme, mental_state_note: data.mental_state_note });
+    } catch { /* silent */ }
+    setDumpProcessing(false);
+  };
+
+  const fileItem = async (item: Record<string, unknown>, filedAs: "works" | "doesnt_work") => {
+    if (!authUser) return;
+    await supabase.from("extracted_items").insert({ ...item, user_id: authUser.id, filed_as: filedAs });
+    setDumpExtractions(prev => prev.filter(i => i !== item));
+    if (filedAs === "works")       setWorksItems(prev => [{ ...item, filed_as: "works" }, ...prev]);
+    if (filedAs === "doesnt_work") setDoesntItems(prev => [{ ...item, filed_as: "doesnt_work" }, ...prev]);
+  };
+
+  const saveItemToLab = async (item: Record<string, unknown>) => {
+    if (!authUser || !org) return;
+    const upside = (item.upside as number) ?? 5;
+    const downside = (item.downside as number) ?? 5;
+    const effort = (item.effort as number) ?? 5;
+    const category = categoriseIdea(upside, downside, effort);
+    await supabase.from("ideas").insert({ title: item.content, upside, downside, effort, category, user_id: authUser.id, org_id: org.id });
+    await load(authUser.id, org.id);
   };
 
   const generateTodo = async () => {
@@ -366,7 +464,7 @@ export default function App() {
       ideas: ideas.slice(0, 15).map(i => ({ ...i, score: opportunityScore(i.upside, i.downside, i.effort) })),
       recentLogs: logs.slice(0, 7),
       portfolioHealth: portfolioHealth(ideas),
-      infoDump: infoDump.trim() || undefined,
+      libraryContext: worksItems.slice(0, 5).map(i => i.content).join("; ") || undefined,
     };
 
     try {
@@ -473,32 +571,45 @@ export default function App() {
           </div>
         </div>
 
-        {/* Nav */}
-        <nav style={{ flex: 1, padding: "12px 10px" }}>
-          {TABS.map(t => {
+        {/* Nav — split Personal / Org */}
+        <nav style={{ flex: 1, padding: "12px 10px", display: "flex", flexDirection: "column", gap: 2 }}>
+          {/* Personal section */}
+          <p style={{ fontSize: 9, fontWeight: 800, color: DIM, textTransform: "uppercase", letterSpacing: "0.12em", padding: "4px 14px 6px", margin: 0 }}>Personal</p>
+          {PERSONAL_TABS.map(t => {
             const active = tab === t;
             return (
               <button key={t} onClick={() => setTab(t)}
-                style={{
-                  width: "100%", display: "flex", alignItems: "center", gap: 12,
-                  padding: "11px 14px", borderRadius: 12, border: "none", cursor: "pointer",
-                  marginBottom: 2, textAlign: "left", transition: "all 0.15s",
-                  background: active ? `${P.purple}20` : "transparent",
-                  color: active ? TEXT : DIM, fontWeight: active ? 700 : 500, fontSize: 14,
-                  boxShadow: active ? `inset 3px 0 0 ${P.purple}, 0 0 20px ${P.purple}10` : "none",
-                }}>
-                <span style={{ fontSize: 16 }}>{TAB_ICONS[t]}</span>
+                style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 12, border: "none", cursor: "pointer", textAlign: "left", transition: "all 0.15s", background: active ? `${P.purple}20` : "transparent", color: active ? TEXT : DIM, fontWeight: active ? 700 : 500, fontSize: 14, boxShadow: active ? `inset 3px 0 0 ${P.purple}, 0 0 20px ${P.purple}10` : "none" }}>
+                <span style={{ fontSize: 15 }}>{TAB_ICONS[t]}</span>
                 {t}
-                {t === "Today" && todayTodos.length > 0 && (
-                  <span style={{ marginLeft: "auto", background: checkedTodos.size === todayTodos.length ? P.emerald : P.purple, color: "#fff", borderRadius: 20, padding: "1px 7px", fontSize: 10, fontWeight: 800 }}>
-                    {checkedTodos.size}/{todayTodos.length}
-                  </span>
-                )}
-                {t === "Idea Lab" && ideas.length > 0 && (
-                  <span style={{ marginLeft: "auto", background: P.violet + "30", color: P.violet, borderRadius: 20, padding: "1px 7px", fontSize: 10, fontWeight: 800 }}>
-                    {ideas.length}
-                  </span>
-                )}
+                {t === "Today" && todayTodos.length > 0 && <span style={{ marginLeft: "auto", background: checkedTodos.size === todayTodos.length ? P.emerald : P.purple, color: "#fff", borderRadius: 20, padding: "1px 7px", fontSize: 10, fontWeight: 800 }}>{checkedTodos.size}/{todayTodos.length}</span>}
+              </button>
+            );
+          })}
+
+          {/* Org section */}
+          <div style={{ margin: "10px 0 6px", borderTop: `1px solid ${BORDER}`, paddingTop: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 14px 6px" }}>
+              <p style={{ fontSize: 9, fontWeight: 800, color: P.gold, textTransform: "uppercase", letterSpacing: "0.12em", margin: 0 }}>{org?.name ?? "Workspace"}</p>
+              {/* Member avatar dots */}
+              <div style={{ display: "flex", gap: 3 }}>
+                {members.filter(m => m.status === "active").slice(0, 3).map(m => (
+                  <div key={m.id} style={{ width: 16, height: 16, borderRadius: "50%", background: m.profile?.avatar_color ?? P.purple, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, fontWeight: 800, color: "#fff" }}>
+                    {(m.profile?.name ?? "?")[0].toUpperCase()}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          {ORG_TABS.map(t => {
+            const active = tab === t;
+            return (
+              <button key={t} onClick={() => setTab(t)}
+                style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 12, border: "none", cursor: "pointer", textAlign: "left", transition: "all 0.15s", background: active ? `${P.gold}15` : "transparent", color: active ? TEXT : DIM, fontWeight: active ? 700 : 500, fontSize: 14, boxShadow: active ? `inset 3px 0 0 ${P.gold}, 0 0 20px ${P.gold}08` : "none" }}>
+                <span style={{ fontSize: 15 }}>{TAB_ICONS[t]}</span>
+                {t}
+                {t === "Idea Lab" && ideas.length > 0 && <span style={{ marginLeft: "auto", background: P.violet + "30", color: P.violet, borderRadius: 20, padding: "1px 7px", fontSize: 10, fontWeight: 800 }}>{ideas.length}</span>}
+                {t === "Team" && members.length > 0 && <span style={{ marginLeft: "auto", background: `${P.gold}25`, color: P.gold, borderRadius: 20, padding: "1px 7px", fontSize: 10, fontWeight: 800 }}>{members.filter(m => m.status === "active").length}</span>}
               </button>
             );
           })}
@@ -534,103 +645,198 @@ export default function App() {
         {/* ═══════ ADVISOR ═══════ */}
         {tab === "Advisor" && (
           <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
-            {/* Header */}
-            <div style={{ padding: "20px 32px 16px", borderBottom: `1px solid ${BORDER}`, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div>
-                <h1 style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-0.03em", margin: 0 }}>🧠 Founder Advisor</h1>
-                <p style={{ fontSize: 12, color: DIM, margin: "3px 0 0" }}>Asymmetric intelligence · Knows your portfolio, goals &amp; logs · Always objective</p>
+            {/* Header + sub-nav */}
+            <div style={{ padding: "16px 32px 0", borderBottom: `1px solid ${BORDER}`, flexShrink: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                <div>
+                  <h1 style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-0.03em", margin: 0 }}>🧠 Founder Advisor</h1>
+                  <p style={{ fontSize: 12, color: DIM, margin: "3px 0 0" }}>Asymmetric intelligence · Objective · Knows your full context</p>
+                </div>
+                {advisorView === "dump" && dumpExtractions.length > 0 && (
+                  <span style={{ fontSize: 12, color: P.violet, fontWeight: 700 }}>{dumpExtractions.length} extractions ready</span>
+                )}
               </div>
-              <button onClick={() => setInfoDumpOpen(o => !o)}
-                style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 10, border: `1px solid ${infoDump.trim() ? P.violet + "60" : BORDER}`, background: infoDump.trim() ? `${P.violet}15` : "rgba(255,255,255,0.04)", color: infoDump.trim() ? P.violet : DIM, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                📎 Info Dump {infoDump.trim() ? "· Active" : ""}
-              </button>
+              {/* Sub-nav tabs */}
+              <div style={{ display: "flex", gap: 0 }}>
+                {(["chat", "dump", "library"] as const).map(v => (
+                  <button key={v} onClick={() => setAdvisorView(v)}
+                    style={{ padding: "9px 20px", border: "none", background: "none", cursor: "pointer", fontSize: 13, fontWeight: 700, color: advisorView === v ? TEXT : DIM, borderBottom: `2px solid ${advisorView === v ? P.purple : "transparent"}`, transition: "all 0.15s", textTransform: "capitalize" }}>
+                    {v === "chat" ? "💬 Chat" : v === "dump" ? "📥 Info Dump" : `📚 Library (${worksItems.length + doesntItems.length})`}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* Info dump panel */}
-            {infoDumpOpen && (
-              <div style={{ padding: "16px 32px", borderBottom: `1px solid ${BORDER}`, background: `${P.violet}08`, flexShrink: 0 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: P.violet, textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 8px" }}>Context Dump — paste anything here</p>
-                <p style={{ fontSize: 12, color: DIM, margin: "0 0 10px" }}>Meeting notes, research, ideas, articles, numbers — the advisor reads all of this in every message.</p>
-                <textarea
-                  rows={6}
-                  style={{ ...inputSt, resize: "vertical", fontFamily: "inherit", fontSize: 13, lineHeight: 1.6 }}
-                  placeholder="Dump any raw context here — competitor analysis, customer feedback, revenue numbers, thoughts you haven't organised yet, articles you've read. The advisor will use this as background knowledge."
-                  value={infoDump}
-                  onChange={e => setInfoDump(e.target.value)}
-                />
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
-                  <span style={{ fontSize: 11, color: DIM }}>{infoDump.length} characters</span>
-                  <button onClick={() => { setInfoDump(""); }} style={{ background: "none", border: "none", color: DIM, fontSize: 12, cursor: "pointer", fontWeight: 600 }}>Clear</button>
+            {/* ── CHAT VIEW ── */}
+            {advisorView === "chat" && (<>
+              <div style={{ flex: 1, overflowY: "auto", padding: "24px 32px", display: "flex", flexDirection: "column", gap: 16 }}>
+                {chatMessages.length === 0 && (
+                  <div style={{ margin: "auto", maxWidth: 560, textAlign: "center" }}>
+                    <div style={{ fontSize: 48, marginBottom: 16 }}>🧠</div>
+                    <h2 style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-0.03em", margin: "0 0 10px" }}>What do you want to solve?</h2>
+                    <p style={{ fontSize: 14, color: DIM, lineHeight: 1.7, margin: "0 0 28px" }}>I know your ideas, goals, logs, and portfolio. I&apos;ll challenge bad decisions and back asymmetric ones.</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, textAlign: "left" }}>
+                      {["What should I focus on today?","Am I on track to hit my goals?","What's the biggest risk in my portfolio?","Where am I wasting the most time?","Which idea has the most asymmetric upside?","What would you cut from my portfolio right now?"].map(q => (
+                        <button key={q} onClick={() => setChatInput(q)}
+                          style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${BORDER}`, borderRadius: 12, padding: "12px 16px", color: TEXT, fontSize: 13, cursor: "pointer", textAlign: "left", lineHeight: 1.4, transition: "all 0.15s" }}
+                          onMouseEnter={e => (e.currentTarget.style.borderColor = P.violet + "60")}
+                          onMouseLeave={e => (e.currentTarget.style.borderColor = BORDER)}>{q}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {chatMessages.map((m, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start", gap: 12 }}>
+                    {m.role === "assistant" && <div style={{ width: 28, height: 28, borderRadius: 8, background: `linear-gradient(135deg, ${P.purple}, ${P.violet})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0, marginTop: 2 }}>🧠</div>}
+                    <div style={{ maxWidth: "70%", padding: "13px 18px", borderRadius: m.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px", background: m.role === "user" ? `linear-gradient(135deg, ${P.purple}DD, ${P.purple})` : "rgba(255,255,255,0.06)", border: `1px solid ${m.role === "user" ? P.purple + "50" : BORDER}`, fontSize: 14, color: TEXT, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+                      {m.content || <span style={{ color: DIM, fontStyle: "italic" }}>Thinking...</span>}
+                    </div>
+                  </div>
+                ))}
+                <div ref={chatBottomRef} />
+              </div>
+              <div style={{ padding: "16px 32px 24px", borderTop: `1px solid ${BORDER}`, flexShrink: 0 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-end", maxWidth: 900, margin: "0 auto" }}>
+                  <textarea rows={2} style={{ ...inputSt, flex: 1, resize: "none", fontFamily: "inherit", fontSize: 14, lineHeight: 1.6, padding: "12px 18px" }} placeholder="Ask anything — strategy, prioritisation, idea validation, goal analysis..." value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }} />
+                  <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()} style={{ height: 52, width: 52, borderRadius: 14, border: "none", background: chatLoading || !chatInput.trim() ? "rgba(255,255,255,0.06)" : `linear-gradient(135deg, ${P.purple}, ${P.violet})`, color: "#fff", cursor: chatLoading || !chatInput.trim() ? "not-allowed" : "pointer", fontSize: 20, flexShrink: 0, boxShadow: chatInput.trim() ? `0 4px 20px ${P.purple}50` : "none", transition: "all 0.15s" }}>
+                    {chatLoading ? "…" : "↑"}
+                  </button>
                 </div>
+                <p style={{ fontSize: 11, color: DIM, margin: "8px 0 0", textAlign: "center" }}>Enter to send · Shift+Enter for new line</p>
+              </div>
+            </>)}
+
+            {/* ── INFO DUMP VIEW ── */}
+            {advisorView === "dump" && (
+              <div style={{ flex: 1, overflowY: "auto", padding: "28px 32px", display: "flex", flexDirection: "column", gap: 24 }}>
+                {/* Capture */}
+                <Card style={{ padding: 28 }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 800, margin: "0 0 6px" }}>📥 Capture</h3>
+                  <p style={{ fontSize: 13, color: DIM, margin: "0 0 16px", lineHeight: 1.6 }}>Dump anything here — thoughts, research, ideas, notes, numbers. No structure needed. The AI will extract, score, and categorise everything.</p>
+                  <textarea rows={8} style={{ ...inputSt, resize: "vertical", fontFamily: "inherit", fontSize: 14, lineHeight: 1.7 }} placeholder="e.g. I keep thinking about launching a personal brand. We have 150k followers and cars get insane engagement. I spoke to a guy who does luxury car content and earns £20k/month from brand deals alone. But I'm worried about time — building this app is already taking all my focus. Maybe we should just post 3 videos this week and see what happens..." value={dumpText} onChange={e => setDumpText(e.target.value)} />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, margin: "16px 0" }}>
+                    {[{ label: "Energy", val: dumpEnergy, set: setDumpEnergy, color: P.emerald }, { label: "Clarity", val: dumpClarity, set: setDumpClarity, color: P.cyan }].map(s => (
+                      <div key={s.label}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: DIM, textTransform: "uppercase", letterSpacing: "0.08em" }}>{s.label} when writing</span>
+                          <span style={{ fontSize: 13, fontWeight: 800, color: s.color }}>{s.val}/10</span>
+                        </div>
+                        <input type="range" min={1} max={10} value={s.val} onChange={e => s.set(+e.target.value)} style={{ width: "100%", accentColor: s.color }} />
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={processDump} disabled={dumpProcessing || !dumpText.trim()}
+                    style={{ width: "100%", border: "none", borderRadius: 12, padding: "13px 0", fontSize: 14, fontWeight: 800, color: "#fff", cursor: dumpProcessing || !dumpText.trim() ? "not-allowed" : "pointer", opacity: dumpProcessing || !dumpText.trim() ? 0.5 : 1, background: `linear-gradient(135deg, ${P.purple}CC, ${P.purple})`, boxShadow: `0 4px 20px ${P.purple}40`, transition: "all 0.15s" }}>
+                    {dumpProcessing ? "Extracting..." : "Extract & Score →"}
+                  </button>
+                </Card>
+
+                {/* Meta insight */}
+                {dumpMeta && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    {[{ label: "You're thinking about", val: dumpMeta.dominant_theme, color: P.violet }, { label: "Mental state note", val: dumpMeta.mental_state_note, color: P.cyan }, { label: "Biggest DO", val: dumpMeta.do_summary, color: P.emerald }, { label: "Biggest DON'T", val: dumpMeta.dont_summary, color: P.red }].map(s => s.val && (
+                      <div key={s.label} style={{ padding: "14px 18px", borderRadius: 14, background: `${s.color}10`, border: `1px solid ${s.color}30` }}>
+                        <p style={{ fontSize: 10, fontWeight: 800, color: s.color, textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 6px" }}>{s.label}</p>
+                        <p style={{ fontSize: 13, color: TEXT, margin: 0, lineHeight: 1.6 }}>{s.val}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Extractions */}
+                {dumpExtractions.length > 0 && (
+                  <Card style={{ padding: 24 }}>
+                    <h3 style={{ fontSize: 14, fontWeight: 800, margin: "0 0 6px" }}>Extractions — file each one</h3>
+                    <p style={{ fontSize: 12, color: DIM, margin: "0 0 18px" }}>File to Works/Doesn&apos;t Work to build your knowledge library. Save the best ones to Idea Lab.</p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      {dumpExtractions.map((item, i) => {
+                        const cat = item.category as string;
+                        const meta = CAT[cat] ?? CAT.standard;
+                        const score = item.score as number;
+                        return (
+                          <div key={i} style={{ padding: "16px 18px", borderRadius: 14, background: "rgba(255,255,255,0.03)", border: `1px solid ${item.verdict === "do" ? meta.color + "40" : BORDER}` }}>
+                            <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
+                              <ScoreRing score={score} color={meta.color} size={44} />
+                              <div style={{ flex: 1 }}>
+                                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
+                                  <Badge label={meta.label} color={meta.color} />
+                                  <Badge label={item.verdict === "do" ? "DO" : "DON'T"} color={item.verdict === "do" ? P.emerald : P.red} />
+                                  <span style={{ fontSize: 11, color: DIM, textTransform: "capitalize" }}>{item.type as string}</span>
+                                </div>
+                                <p style={{ fontSize: 14, fontWeight: 700, color: TEXT, margin: "0 0 4px" }}>{item.content as string}</p>
+                                <p style={{ fontSize: 12, color: DIM, margin: 0, fontStyle: "italic" }}>{item.verdict_reason as string}</p>
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              <button onClick={() => fileItem(item, "works")} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${P.emerald}40`, background: `${P.emerald}10`, color: P.emerald, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>✓ Works</button>
+                              <button onClick={() => fileItem(item, "doesnt_work")} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${P.red}40`, background: `${P.red}10`, color: P.red, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>✗ Doesn&apos;t Work</button>
+                              {(item.verdict as string) === "do" && <button onClick={() => saveItemToLab(item)} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${P.purple}40`, background: `${P.purple}10`, color: P.violet, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>💡 Save to Idea Lab</button>}
+                              <button onClick={() => setDumpExtractions(prev => prev.filter((_, j) => j !== i))} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${BORDER}`, background: "transparent", color: DIM, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Discard</button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </Card>
+                )}
               </div>
             )}
 
-            {/* Messages */}
-            <div style={{ flex: 1, overflowY: "auto", padding: "24px 32px", display: "flex", flexDirection: "column", gap: 16 }}>
-              {chatMessages.length === 0 && (
-                <div style={{ margin: "auto", maxWidth: 560, textAlign: "center" }}>
-                  <div style={{ fontSize: 48, marginBottom: 16 }}>🧠</div>
-                  <h2 style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-0.03em", margin: "0 0 10px" }}>What do you want to solve?</h2>
-                  <p style={{ fontSize: 14, color: DIM, lineHeight: 1.7, margin: "0 0 28px" }}>
-                    I know your ideas, goals, logs, and portfolio. I&apos;ll challenge bad decisions and back asymmetric ones.
-                    Use the Info Dump above to give me extra context — research, notes, anything unstructured.
-                  </p>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, textAlign: "left" }}>
-                    {[
-                      "What should I focus on today?",
-                      "Am I on track to hit my goals?",
-                      "What's the biggest risk in my portfolio?",
-                      "Where am I wasting the most time?",
-                      "Which of my ideas has the most asymmetric upside?",
-                      "What would you cut from my portfolio right now?",
-                    ].map(q => (
-                      <button key={q} onClick={() => setChatInput(q)}
-                        style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${BORDER}`, borderRadius: 12, padding: "12px 16px", color: TEXT, fontSize: 13, fontWeight: 500, cursor: "pointer", textAlign: "left", lineHeight: 1.4, transition: "all 0.15s" }}
-                        onMouseEnter={e => (e.currentTarget.style.borderColor = P.violet + "60")}
-                        onMouseLeave={e => (e.currentTarget.style.borderColor = BORDER)}>
-                        {q}
-                      </button>
-                    ))}
-                  </div>
+            {/* ── LIBRARY VIEW ── */}
+            {advisorView === "library" && (
+              <div style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+                  {[{ label: "What Works", items: worksItems, color: P.emerald, icon: "✓" }, { label: "What Doesn't Work", items: doesntItems, color: P.red, icon: "✗" }].map(section => (
+                    <div key={section.label}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                        <div style={{ width: 28, height: 28, borderRadius: 8, background: `${section.color}20`, border: `1px solid ${section.color}40`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: section.color, fontWeight: 800 }}>{section.icon}</div>
+                        <h3 style={{ fontSize: 15, fontWeight: 800, margin: 0, color: section.color }}>{section.label}</h3>
+                        <span style={{ fontSize: 11, color: DIM, marginLeft: "auto" }}>{section.items.length} items</span>
+                      </div>
+                      {section.items.length === 0 ? (
+                        <div style={{ padding: 24, borderRadius: 14, background: "rgba(255,255,255,0.02)", border: `1px solid ${BORDER}`, textAlign: "center" }}>
+                          <p style={{ fontSize: 13, color: DIM, margin: 0 }}>File items from Info Dump to build this library.</p>
+                          {section.items.length === 0 && worksItems.length + doesntItems.length < 3 && <p style={{ fontSize: 11, color: DIM, margin: "6px 0 0" }}>Patterns unlock after 3+ items. Philosophies after patterns converge.</p>}
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {section.items.map((item, i) => (
+                            <div key={i} style={{ padding: "12px 16px", borderRadius: 12, background: `${section.color}08`, border: `1px solid ${section.color}25` }}>
+                              <p style={{ fontSize: 13, fontWeight: 700, color: TEXT, margin: "0 0 4px" }}>{item.content as string}</p>
+                              <p style={{ fontSize: 11, color: DIM, margin: 0, fontStyle: "italic" }}>{item.verdict_reason as string}</p>
+                            </div>
+                          ))}
+                          {section.items.length >= 3 && (
+                            <div style={{ padding: "12px 16px", borderRadius: 12, background: `${P.gold}10`, border: `1px solid ${P.gold}30`, marginTop: 4 }}>
+                              <p style={{ fontSize: 11, fontWeight: 800, color: P.gold, textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 4px" }}>Pattern emerging</p>
+                              <p style={{ fontSize: 12, color: DIM, margin: 0 }}>Add {Math.max(0, 3 - section.items.length)} more items to unlock pattern synthesis · Philosophy generation unlocks at 2+ patterns</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              )}
-              {chatMessages.map((m, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start", gap: 12 }}>
-                  {m.role === "assistant" && (
-                    <div style={{ width: 28, height: 28, borderRadius: 8, background: `linear-gradient(135deg, ${P.purple}, ${P.violet})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0, marginTop: 2 }}>🧠</div>
-                  )}
-                  <div style={{
-                    maxWidth: "70%", padding: "13px 18px",
-                    borderRadius: m.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-                    background: m.role === "user" ? `linear-gradient(135deg, ${P.purple}DD, ${P.purple})` : "rgba(255,255,255,0.06)",
-                    border: `1px solid ${m.role === "user" ? P.purple + "50" : BORDER}`,
-                    fontSize: 14, color: TEXT, lineHeight: 1.7, whiteSpace: "pre-wrap",
-                  }}>
-                    {m.content || <span style={{ color: DIM, fontStyle: "italic" }}>Thinking...</span>}
+                {/* Past dumps */}
+                {savedDumps.length > 0 && (
+                  <div style={{ marginTop: 32 }}>
+                    <h3 style={{ fontSize: 14, fontWeight: 800, margin: "0 0 14px", color: DIM }}>Past Dumps ({savedDumps.length})</h3>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {savedDumps.map((d, i) => (
+                        <div key={i} style={{ padding: "12px 16px", borderRadius: 12, background: "rgba(255,255,255,0.03)", border: `1px solid ${BORDER}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <p style={{ fontSize: 13, color: TEXT, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "70%" }}>{(d.raw_text as string).slice(0, 80)}...</p>
+                          <div style={{ display: "flex", gap: 10, alignItems: "center", flexShrink: 0 }}>
+                            <span style={{ fontSize: 11, color: P.emerald }}>⚡{d.mental_state_energy as number}</span>
+                            <span style={{ fontSize: 11, color: P.cyan }}>🎯{d.mental_state_clarity as number}</span>
+                            <span style={{ fontSize: 11, color: DIM }}>{new Date(d.created_at as string).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
-              <div ref={chatBottomRef} />
-            </div>
-
-            {/* Input */}
-            <div style={{ padding: "16px 32px 24px", borderTop: `1px solid ${BORDER}`, flexShrink: 0 }}>
-              <div style={{ display: "flex", gap: 10, alignItems: "flex-end", maxWidth: 900, margin: "0 auto" }}>
-                <textarea
-                  rows={2}
-                  style={{ ...inputSt, flex: 1, resize: "none", fontFamily: "inherit", fontSize: 14, lineHeight: 1.6, padding: "12px 18px" }}
-                  placeholder="Ask anything — strategy, prioritisation, idea validation, goal analysis..."
-                  value={chatInput}
-                  onChange={e => setChatInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
-                />
-                <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()}
-                  style={{ height: 52, width: 52, borderRadius: 14, border: "none", background: chatLoading || !chatInput.trim() ? "rgba(255,255,255,0.06)" : `linear-gradient(135deg, ${P.purple}, ${P.violet})`, color: "#fff", cursor: chatLoading || !chatInput.trim() ? "not-allowed" : "pointer", fontSize: 20, flexShrink: 0, boxShadow: chatInput.trim() ? `0 4px 20px ${P.purple}50` : "none", transition: "all 0.15s" }}>
-                  {chatLoading ? "…" : "↑"}
-                </button>
+                )}
               </div>
-              <p style={{ fontSize: 11, color: DIM, margin: "8px 0 0", textAlign: "center" }}>Enter to send · Shift+Enter for new line</p>
-            </div>
+            )}
           </div>
         )}
 
@@ -1056,6 +1262,89 @@ export default function App() {
                     );
                   })}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════ TEAM ═══════ */}
+        {tab === "Team" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 24, maxWidth: 900 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <h1 style={{ fontSize: 30, fontWeight: 900, letterSpacing: "-0.04em", margin: 0 }}>👥 {org?.name ?? "Team"}</h1>
+                <p style={{ fontSize: 14, color: DIM, marginTop: 6 }}>Your workspace — everyone&apos;s activity in one place</p>
+              </div>
+            </div>
+
+            {/* Invite */}
+            <Card style={{ padding: 24 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 800, margin: "0 0 12px" }}>Invite your cofounder</h3>
+              <div style={{ display: "flex", gap: 10 }}>
+                <input style={{ ...inputSt, flex: 1 }} type="email" placeholder="cofounder@email.com" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} onKeyDown={e => e.key === "Enter" && sendInvite()} />
+                <button onClick={sendInvite} disabled={inviteSending || !inviteEmail.trim()}
+                  style={{ padding: "10px 20px", borderRadius: 12, border: "none", background: `linear-gradient(135deg, ${P.gold}CC, ${P.gold}AA)`, color: "#1a1200", fontWeight: 800, fontSize: 13, cursor: "pointer", opacity: inviteSending ? 0.6 : 1, whiteSpace: "nowrap" }}>
+                  {inviteSending ? "Sending..." : "Send invite"}
+                </button>
+              </div>
+              {inviteDone && <p style={{ fontSize: 13, color: P.emerald, marginTop: 8 }}>✓ Invite saved — share this link: <strong style={{ color: P.violet }}>{typeof window !== "undefined" ? `${window.location.origin}/invite/${org?.id}` : ""}</strong></p>}
+              <p style={{ fontSize: 12, color: DIM, marginTop: 8 }}>They&apos;ll join via <code style={{ color: P.violet }}>/invite/{org?.id?.slice(0,8)}...</code> — copy and send it directly.</p>
+            </Card>
+
+            {/* Members */}
+            <div>
+              <h3 style={{ fontSize: 14, fontWeight: 800, margin: "0 0 14px", color: DIM, textTransform: "uppercase", letterSpacing: "0.08em" }}>Members</h3>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}>
+                {members.map(m => (
+                  <Card key={m.id} style={{ padding: 20 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+                      <div style={{ width: 40, height: 40, borderRadius: 12, background: m.profile?.avatar_color ?? P.purple, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 800, color: "#fff", boxShadow: `0 0 16px ${m.profile?.avatar_color ?? P.purple}50` }}>
+                        {(m.profile?.name ?? m.invited_email ?? "?")[0].toUpperCase()}
+                      </div>
+                      <div>
+                        <p style={{ fontSize: 14, fontWeight: 800, color: TEXT, margin: 0 }}>{m.profile?.name ?? m.invited_email ?? "Pending"}</p>
+                        <p style={{ fontSize: 11, color: m.role === "owner" ? P.gold : DIM, margin: 0, fontWeight: 600, textTransform: "capitalize" }}>{m.role} · {m.status}</p>
+                      </div>
+                    </div>
+                    {m.status === "pending" && <div style={{ padding: "8px 12px", borderRadius: 8, background: `${P.orange}10`, border: `1px solid ${P.orange}30` }}><p style={{ fontSize: 11, color: P.orange, margin: 0 }}>Invite pending — share the invite link</p></div>}
+                  </Card>
+                ))}
+              </div>
+            </div>
+
+            {/* Activity feed */}
+            <div>
+              <h3 style={{ fontSize: 14, fontWeight: 800, margin: "0 0 14px", color: DIM, textTransform: "uppercase", letterSpacing: "0.08em" }}>Live Activity</h3>
+              <Card style={{ padding: 8 }}>
+                {activity.length === 0 ? (
+                  <p style={{ fontSize: 13, color: DIM, padding: "20px 16px", textAlign: "center", margin: 0 }}>No activity yet — start logging ideas, revenue, and goals</p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    {activity.map((a, i) => {
+                      const meta = a.metadata as Record<string, unknown>;
+                      const profile = a.profiles as Record<string, unknown> | null;
+                      const name = (profile?.name as string) ?? "Unknown";
+                      const color = (profile?.avatar_color as string) ?? P.purple;
+                      const timeAgo = (() => {
+                        const diff = Date.now() - new Date(a.created_at as string).getTime();
+                        if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+                        if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+                        return `${Math.floor(diff / 86400000)}d ago`;
+                      })();
+                      const label = a.type === "idea_added" ? `Added idea: ${meta?.title ?? ""} (${meta?.score ?? ""}pts)` : a.type === "revenue_logged" ? `Logged £${meta?.amount} revenue` : a.type === "followers_logged" ? `Logged ${meta?.amount} followers` : a.type === "goal_added" ? `Added goal: ${meta?.title}` : a.type as string;
+                      return (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: i < activity.length - 1 ? `1px solid ${BORDER}` : "none" }}>
+                          <div style={{ width: 28, height: 28, borderRadius: 8, background: color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: "#fff", flexShrink: 0 }}>{name[0].toUpperCase()}</div>
+                          <div style={{ flex: 1 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: TEXT }}>{name} </span>
+                            <span style={{ fontSize: 12, color: DIM }}>{label}</span>
+                          </div>
+                          <span style={{ fontSize: 11, color: DIM, flexShrink: 0 }}>{timeAgo}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
             </div>
           </div>
         )}
