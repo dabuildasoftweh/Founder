@@ -34,18 +34,22 @@ export default function Integrations() {
     shopify: { connected: false, last_sync_at: null, sync_error: null },
   });
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
-  const [shopifyDomain, setShopifyDomain] = useState("");
-  const [shopifyToken, setShopifyToken] = useState("");
-  const [shopifySaving, setShopifySaving] = useState(false);
 
   useEffect(() => {
+    // Handle OAuth callbacks: ?shopify=connected, ?integration=youtube&status=connected
+    const shopifyStatus = params.get("shopify");
     const integrationParam = params.get("integration");
     const statusParam = params.get("status");
-    if (integrationParam && statusParam) {
+
+    if (shopifyStatus) {
       setToast({
-        msg: statusParam === "connected"
-          ? `${integrationParam} connected successfully`
-          : `${integrationParam} connection ${statusParam}`,
+        msg: shopifyStatus === "connected" ? "Shopify connected — syncing your data now" : `Shopify connection ${shopifyStatus}`,
+        ok: shopifyStatus === "connected",
+      });
+      setTimeout(() => setToast(null), 5000);
+    } else if (integrationParam && statusParam) {
+      setToast({
+        msg: statusParam === "connected" ? `${integrationParam} connected successfully` : `${integrationParam} connection ${statusParam}`,
         ok: statusParam === "connected",
       });
       setTimeout(() => setToast(null), 4000);
@@ -85,31 +89,6 @@ export default function Integrations() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function connectShopify() {
-    if (!shopifyDomain.trim() || !shopifyToken.trim() || !orgId) return;
-    setShopifySaving(true);
-
-    const domain = shopifyDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
-
-    // Validate the token works before storing
-    const testRes = await fetch(`/api/connect/shopify/validate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ domain, token: shopifyToken, orgId }),
-    });
-
-    if (!testRes.ok) {
-      setToast({ msg: "Could not connect — check your domain and token", ok: false });
-      setTimeout(() => setToast(null), 4000);
-      setShopifySaving(false);
-      return;
-    }
-
-    setPlatforms(p => ({ ...p, shopify: { connected: true, last_sync_at: new Date().toISOString(), sync_error: null } }));
-    setToast({ msg: "Shopify connected", ok: true });
-    setTimeout(() => setToast(null), 4000);
-    setShopifySaving(false);
-  }
 
   function formatSync(ts: string | null) {
     if (!ts) return "Never synced";
@@ -150,31 +129,12 @@ export default function Integrations() {
       dataPoints: ["Order revenue (real-time)", "Refunds", "Orders count (30d)", "Revenue (30d)"],
       trustNote: "Order amounts and IDs only — customer data and product descriptions are never stored.",
       connectEl: (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <input
-            placeholder="yourstore.myshopify.com"
-            value={shopifyDomain}
-            onChange={e => setShopifyDomain(e.target.value)}
-            style={{ background: "rgba(255,255,255,0.06)", border: `1px solid ${BORDER}`, borderRadius: 8, padding: "10px 14px", color: TEXT, fontSize: 13, outline: "none" }}
-          />
-          <input
-            placeholder="Shopify Admin API token (starts with shpat_)"
-            value={shopifyToken}
-            onChange={e => setShopifyToken(e.target.value)}
-            type="password"
-            style={{ background: "rgba(255,255,255,0.06)", border: `1px solid ${BORDER}`, borderRadius: 8, padding: "10px 14px", color: TEXT, fontSize: 13, outline: "none" }}
-          />
-          <button
-            onClick={connectShopify}
-            disabled={shopifySaving || !shopifyDomain.trim() || !shopifyToken.trim()}
-            style={{ padding: "10px 20px", background: `linear-gradient(135deg, #96BF48, #5a8a00)`, borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 14, border: "none", cursor: "pointer", opacity: shopifySaving ? 0.6 : 1 }}
-          >
-            {shopifySaving ? "Connecting..." : "Connect Shopify →"}
-          </button>
-          <p style={{ fontSize: 11, color: DIM, margin: 0 }}>
-            Create a Custom App in Shopify Admin → Apps → Develop apps. Grant read access to Orders and Products.
-          </p>
-        </div>
+        <a
+          href={orgId ? `/api/connect/shopify?org_id=${orgId}` : "#"}
+          style={{ display: "inline-block", padding: "10px 20px", background: "linear-gradient(135deg, #96BF48, #5a8a00)", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 14, textDecoration: "none" }}
+        >
+          Connect with Shopify →
+        </a>
       ),
     },
   ];
