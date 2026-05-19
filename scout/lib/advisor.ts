@@ -1,4 +1,4 @@
-import { Idea, FounderProfile, TodoItem, opportunityScore } from "./supabase";
+import { Idea, FounderProfile, TodoItem, DailyLog, opportunityScore } from "./supabase";
 
 export const MORNING_QUESTIONS = [
   "What's the ONE thing that would make today a win — and are you actually planning to do it?",
@@ -13,22 +13,22 @@ export function generateTodoFromIdeas(
   profile: FounderProfile | null,
   morningAnswers: Record<string, string>
 ): TodoItem[] {
-  const isLowRunway = (profile?.runway_months ?? 12) <= 3;
-  const isLowRisk   = profile?.risk_tolerance === "low";
+  const isLowRunway  = (profile?.runway_months ?? 12) <= 3;
+  const energyAnswer = morningAnswers[2] ?? "";
+  const isHighEnergy = /\b([89]|10)\b/.test(energyAnswer);
 
   const scored = ideas
     .filter(i => i.status === "active" || !i.status)
-    .map(i => ({
-      ...i,
-      score: opportunityScore(i.upside, i.downside, i.effort),
-    }))
+    .map(i => ({ ...i, score: opportunityScore(i.upside, i.downside, i.effort) }))
     .sort((a, b) => {
-      // Low runway: boost easy wins and asymmetric, punish high effort
       if (isLowRunway) {
         if (a.category === "easy_win" && b.category !== "easy_win") return -1;
         if (b.category === "easy_win" && a.category !== "easy_win") return 1;
       }
-      // Filter out traps
+      if (isHighEnergy) {
+        if (a.category === "asymmetric" && b.category !== "asymmetric") return -1;
+        if (b.category === "asymmetric" && a.category !== "asymmetric") return 1;
+      }
       if (a.category === "trap") return 1;
       if (b.category === "trap") return -1;
       return b.score - a.score;
@@ -46,24 +46,30 @@ export function generateTodoFromIdeas(
 
 export function getAdvisorInsight(
   ideas: Idea[],
-  profile: FounderProfile | null
+  profile: FounderProfile | null,
+  logs?: DailyLog[]
 ): string {
-  const runway = profile?.runway_months ?? 12;
+  const runway     = profile?.runway_months ?? 12;
   const asymmetric = ideas.filter(i => i.category === "asymmetric");
   const traps      = ideas.filter(i => i.category === "trap");
   const easyWins   = ideas.filter(i => i.category === "easy_win");
 
-  if (runway <= 2) {
-    return `⚠️ Runway is critically low (${runway} months). Focus ONLY on revenue-generating activities. Deprioritise everything else.`;
+  if (logs && logs.length >= 6) {
+    const recent = logs.slice(0, 3).reduce((s, l) => s + (l.outcome_revenue ?? 0), 0);
+    const prev   = logs.slice(3, 6).reduce((s, l) => s + (l.outcome_revenue ?? 0), 0);
+    if (prev > 0 && recent > prev * 1.2)
+      return `Revenue up ${Math.round((recent / prev - 1) * 100)}% vs last period. Double down on what's working.`;
+    if (prev > 0 && recent < prev * 0.8)
+      return `Revenue down ${Math.round((1 - recent / prev) * 100)}% vs last period. Audit your output types immediately.`;
   }
-  if (traps.length > asymmetric.length) {
-    return `You have ${traps.length} trap ideas eating your attention. These are high effort, low reward. Drop or delegate them.`;
-  }
-  if (asymmetric.length > 0) {
-    return `You have ${asymmetric.length} asymmetric opportunity${asymmetric.length > 1 ? "s" : ""}. These have massive upside with low risk — they should be your primary focus.`;
-  }
-  if (easyWins.length > 0) {
-    return `${easyWins.length} easy win${easyWins.length > 1 ? "s" : ""} available. Pick one up today to build momentum.`;
-  }
+
+  if (runway <= 2)
+    return `⚠️ Runway critically low (${runway} mo). Revenue-generating activities ONLY — everything else is a luxury right now.`;
+  if (traps.length > asymmetric.length && traps.length > 2)
+    return `${traps.length} traps in your portfolio. Every hour on a trap is an hour not on an asymmetric bet. Cut them.`;
+  if (asymmetric.length > 0)
+    return `${asymmetric.length} asymmetric opportunit${asymmetric.length > 1 ? "ies" : "y"} in your pipeline. Massive upside, low downside — these deserve your best hours.`;
+  if (easyWins.length > 0)
+    return `${easyWins.length} easy win${easyWins.length > 1 ? "s" : ""} ready to go. Build momentum — completed work compounds psychologically.`;
   return "Log more ideas to unlock personalised advice.";
 }
