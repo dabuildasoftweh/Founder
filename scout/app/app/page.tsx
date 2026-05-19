@@ -23,10 +23,11 @@ const P = {
   blue: "#3B82F6",   gold: "#FFD700",
 };
 
-const TABS = ["Today", "Idea Lab", "Overview", "Daily Log", "Goals", "Profile"] as const;
+const TABS = ["Advisor", "Today", "Idea Lab", "Overview", "Daily Log", "Goals", "Profile"] as const;
 type Tab = typeof TABS[number];
 
 const TAB_ICONS: Record<Tab, string> = {
+  "Advisor":  "🧠",
   "Today":    "🎯",
   "Idea Lab": "💡",
   "Overview": "📊",
@@ -212,7 +213,7 @@ function HUD({ todos, checked, goals }: { todos: TodoItem[]; checked: Set<number
 
 // ── MAIN ──────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [tab, setTab] = useState<Tab>("Today");
+  const [tab, setTab] = useState<Tab>("Advisor");
 
   const [ideas,   setIdeas]   = useState<Idea[]>([]);
   const [logs,    setLogs]    = useState<DailyLog[]>([]);
@@ -238,11 +239,12 @@ export default function App() {
   const [advisorLoading, setAdvisorLoading] = useState(false);
   const [checkedTodos,   setCheckedTodos]   = useState<Set<number>>(new Set());
 
-  // ── Chat ──
-  const [chatOpen,     setChatOpen]     = useState(false);
+  // ── Advisor ──
   const [chatMessages, setChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [chatInput,    setChatInput]    = useState("");
   const [chatLoading,  setChatLoading]  = useState(false);
+  const [infoDump,     setInfoDump]     = useState("");
+  const [infoDumpOpen, setInfoDumpOpen] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -364,6 +366,7 @@ export default function App() {
       ideas: ideas.slice(0, 15).map(i => ({ ...i, score: opportunityScore(i.upside, i.downside, i.effort) })),
       recentLogs: logs.slice(0, 7),
       portfolioHealth: portfolioHealth(ideas),
+      infoDump: infoDump.trim() || undefined,
     };
 
     try {
@@ -526,7 +529,110 @@ export default function App() {
       </nav>
 
       {/* ── Main content ── */}
-      <main className="main-with-sidebar fade-up" style={{ flex: 1, overflowY: "auto", padding: "36px 40px", minWidth: 0 }}>
+      <main className="main-with-sidebar fade-up" style={{ flex: 1, overflowY: tab === "Advisor" ? "hidden" : "auto", padding: tab === "Advisor" ? 0 : "36px 40px", minWidth: 0, display: "flex", flexDirection: "column" }}>
+
+        {/* ═══════ ADVISOR ═══════ */}
+        {tab === "Advisor" && (
+          <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+            {/* Header */}
+            <div style={{ padding: "20px 32px 16px", borderBottom: `1px solid ${BORDER}`, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <h1 style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-0.03em", margin: 0 }}>🧠 Founder Advisor</h1>
+                <p style={{ fontSize: 12, color: DIM, margin: "3px 0 0" }}>Asymmetric intelligence · Knows your portfolio, goals &amp; logs · Always objective</p>
+              </div>
+              <button onClick={() => setInfoDumpOpen(o => !o)}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 10, border: `1px solid ${infoDump.trim() ? P.violet + "60" : BORDER}`, background: infoDump.trim() ? `${P.violet}15` : "rgba(255,255,255,0.04)", color: infoDump.trim() ? P.violet : DIM, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                📎 Info Dump {infoDump.trim() ? "· Active" : ""}
+              </button>
+            </div>
+
+            {/* Info dump panel */}
+            {infoDumpOpen && (
+              <div style={{ padding: "16px 32px", borderBottom: `1px solid ${BORDER}`, background: `${P.violet}08`, flexShrink: 0 }}>
+                <p style={{ fontSize: 11, fontWeight: 700, color: P.violet, textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 8px" }}>Context Dump — paste anything here</p>
+                <p style={{ fontSize: 12, color: DIM, margin: "0 0 10px" }}>Meeting notes, research, ideas, articles, numbers — the advisor reads all of this in every message.</p>
+                <textarea
+                  rows={6}
+                  style={{ ...inputSt, resize: "vertical", fontFamily: "inherit", fontSize: 13, lineHeight: 1.6 }}
+                  placeholder="Dump any raw context here — competitor analysis, customer feedback, revenue numbers, thoughts you haven't organised yet, articles you've read. The advisor will use this as background knowledge."
+                  value={infoDump}
+                  onChange={e => setInfoDump(e.target.value)}
+                />
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+                  <span style={{ fontSize: 11, color: DIM }}>{infoDump.length} characters</span>
+                  <button onClick={() => { setInfoDump(""); }} style={{ background: "none", border: "none", color: DIM, fontSize: 12, cursor: "pointer", fontWeight: 600 }}>Clear</button>
+                </div>
+              </div>
+            )}
+
+            {/* Messages */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "24px 32px", display: "flex", flexDirection: "column", gap: 16 }}>
+              {chatMessages.length === 0 && (
+                <div style={{ margin: "auto", maxWidth: 560, textAlign: "center" }}>
+                  <div style={{ fontSize: 48, marginBottom: 16 }}>🧠</div>
+                  <h2 style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-0.03em", margin: "0 0 10px" }}>What do you want to solve?</h2>
+                  <p style={{ fontSize: 14, color: DIM, lineHeight: 1.7, margin: "0 0 28px" }}>
+                    I know your ideas, goals, logs, and portfolio. I&apos;ll challenge bad decisions and back asymmetric ones.
+                    Use the Info Dump above to give me extra context — research, notes, anything unstructured.
+                  </p>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, textAlign: "left" }}>
+                    {[
+                      "What should I focus on today?",
+                      "Am I on track to hit my goals?",
+                      "What's the biggest risk in my portfolio?",
+                      "Where am I wasting the most time?",
+                      "Which of my ideas has the most asymmetric upside?",
+                      "What would you cut from my portfolio right now?",
+                    ].map(q => (
+                      <button key={q} onClick={() => setChatInput(q)}
+                        style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${BORDER}`, borderRadius: 12, padding: "12px 16px", color: TEXT, fontSize: 13, fontWeight: 500, cursor: "pointer", textAlign: "left", lineHeight: 1.4, transition: "all 0.15s" }}
+                        onMouseEnter={e => (e.currentTarget.style.borderColor = P.violet + "60")}
+                        onMouseLeave={e => (e.currentTarget.style.borderColor = BORDER)}>
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {chatMessages.map((m, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start", gap: 12 }}>
+                  {m.role === "assistant" && (
+                    <div style={{ width: 28, height: 28, borderRadius: 8, background: `linear-gradient(135deg, ${P.purple}, ${P.violet})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0, marginTop: 2 }}>🧠</div>
+                  )}
+                  <div style={{
+                    maxWidth: "70%", padding: "13px 18px",
+                    borderRadius: m.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+                    background: m.role === "user" ? `linear-gradient(135deg, ${P.purple}DD, ${P.purple})` : "rgba(255,255,255,0.06)",
+                    border: `1px solid ${m.role === "user" ? P.purple + "50" : BORDER}`,
+                    fontSize: 14, color: TEXT, lineHeight: 1.7, whiteSpace: "pre-wrap",
+                  }}>
+                    {m.content || <span style={{ color: DIM, fontStyle: "italic" }}>Thinking...</span>}
+                  </div>
+                </div>
+              ))}
+              <div ref={chatBottomRef} />
+            </div>
+
+            {/* Input */}
+            <div style={{ padding: "16px 32px 24px", borderTop: `1px solid ${BORDER}`, flexShrink: 0 }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-end", maxWidth: 900, margin: "0 auto" }}>
+                <textarea
+                  rows={2}
+                  style={{ ...inputSt, flex: 1, resize: "none", fontFamily: "inherit", fontSize: 14, lineHeight: 1.6, padding: "12px 18px" }}
+                  placeholder="Ask anything — strategy, prioritisation, idea validation, goal analysis..."
+                  value={chatInput}
+                  onChange={e => setChatInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
+                />
+                <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()}
+                  style={{ height: 52, width: 52, borderRadius: 14, border: "none", background: chatLoading || !chatInput.trim() ? "rgba(255,255,255,0.06)" : `linear-gradient(135deg, ${P.purple}, ${P.violet})`, color: "#fff", cursor: chatLoading || !chatInput.trim() ? "not-allowed" : "pointer", fontSize: 20, flexShrink: 0, boxShadow: chatInput.trim() ? `0 4px 20px ${P.purple}50` : "none", transition: "all 0.15s" }}>
+                  {chatLoading ? "…" : "↑"}
+                </button>
+              </div>
+              <p style={{ fontSize: 11, color: DIM, margin: "8px 0 0", textAlign: "center" }}>Enter to send · Shift+Enter for new line</p>
+            </div>
+          </div>
+        )}
 
         {/* ═══════ TODAY ═══════ */}
         {tab === "Today" && (
@@ -999,80 +1105,6 @@ export default function App() {
       {/* ── HUD floating rings ── */}
       <HUD todos={todayTodos} checked={checkedTodos} goals={goals} />
 
-      {/* ── Chat floating button ── */}
-      <button onClick={() => setChatOpen(o => !o)}
-        style={{ position: "fixed", bottom: 24, left: 24, zIndex: 50, width: 52, height: 52, borderRadius: "50%", border: "none", cursor: "pointer", background: `linear-gradient(135deg, ${P.purple}, ${P.violet})`, boxShadow: `0 4px 24px ${P.purple}60`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, transition: "transform 0.2s" }}
-        title="Advisor">
-        {chatOpen ? "✕" : "🧠"}
-      </button>
-
-      {/* ── Chat panel ── */}
-      {chatOpen && (
-        <div style={{ position: "fixed", bottom: 0, left: 0, top: 0, width: 420, zIndex: 49, display: "flex", flexDirection: "column", background: "rgba(7,7,26,0.97)", borderRight: `1px solid ${BORDER}`, backdropFilter: "blur(24px)", boxShadow: `4px 0 40px rgba(0,0,0,0.6)` }}>
-          {/* Header */}
-          <div style={{ padding: "20px 24px 16px", borderBottom: `1px solid ${BORDER}`, flexShrink: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 34, height: 34, borderRadius: 10, background: `linear-gradient(135deg, ${P.purple}, ${P.violet})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, boxShadow: `0 0 16px ${P.purple}50` }}>🧠</div>
-              <div>
-                <p style={{ fontSize: 14, fontWeight: 800, color: TEXT, margin: 0 }}>Founder Advisor</p>
-                <p style={{ fontSize: 11, color: P.violet, margin: 0, fontWeight: 600 }}>Asymmetric Intelligence · Always objective</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Messages */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
-            {chatMessages.length === 0 && (
-              <div style={{ padding: "24px 0", textAlign: "center" }}>
-                <p style={{ fontSize: 13, color: DIM, lineHeight: 1.7, margin: 0 }}>
-                  I know your portfolio, goals, and logs.<br />
-                  Ask me anything — I&apos;ll challenge bad ideas<br />and back asymmetric ones.
-                </p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 20 }}>
-                  {["What should I focus on today?", "Am I on track to hit my goals?", "What's the biggest risk in my portfolio?", "Where am I wasting time?"].map(q => (
-                    <button key={q} onClick={() => { setChatInput(q); }}
-                      style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${BORDER}`, borderRadius: 10, padding: "9px 14px", color: DIM, fontSize: 12, fontWeight: 600, cursor: "pointer", textAlign: "left", transition: "all 0.15s" }}>
-                      {q}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {chatMessages.map((m, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-                <div style={{
-                  maxWidth: "85%", padding: "11px 15px", borderRadius: m.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
-                  background: m.role === "user" ? `linear-gradient(135deg, ${P.purple}CC, ${P.purple})` : "rgba(255,255,255,0.06)",
-                  border: `1px solid ${m.role === "user" ? P.purple + "60" : BORDER}`,
-                  fontSize: 13, color: TEXT, lineHeight: 1.65, whiteSpace: "pre-wrap",
-                }}>
-                  {m.content || <span style={{ color: DIM }}>▊</span>}
-                </div>
-              </div>
-            ))}
-            <div ref={chatBottomRef} />
-          </div>
-
-          {/* Input */}
-          <div style={{ padding: "12px 16px 20px", borderTop: `1px solid ${BORDER}`, flexShrink: 0 }}>
-            <div style={{ display: "flex", gap: 8 }}>
-              <textarea
-                rows={2}
-                style={{ ...inputSt, flex: 1, resize: "none", fontFamily: "inherit", fontSize: 13 }}
-                placeholder="Ask anything about your strategy..."
-                value={chatInput}
-                onChange={e => setChatInput(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
-              />
-              <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()}
-                style={{ width: 44, borderRadius: 12, border: "none", background: chatLoading || !chatInput.trim() ? "rgba(255,255,255,0.06)" : `linear-gradient(135deg, ${P.purple}, ${P.violet})`, color: "#fff", cursor: chatLoading || !chatInput.trim() ? "not-allowed" : "pointer", fontSize: 18, flexShrink: 0, boxShadow: chatInput.trim() ? `0 4px 16px ${P.purple}40` : "none", transition: "all 0.15s" }}>
-                {chatLoading ? "…" : "↑"}
-              </button>
-            </div>
-            <p style={{ fontSize: 10, color: DIM, margin: "6px 0 0", textAlign: "center" }}>Shift+Enter for new line · Enter to send</p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
