@@ -31,9 +31,13 @@ CREATE TABLE IF NOT EXISTS platform_latest (
   revenue_30d  numeric,
   orders_30d   numeric,
   top_content  jsonb,        -- [{title, views, url}] top 5 videos/posts
+  extras       jsonb,        -- platform-specific extended analytics
   updated_at   timestamptz DEFAULT now(),
   PRIMARY KEY (org_id, platform)
 );
+
+-- If table already exists from a prior migration run, just add the extras column
+ALTER TABLE platform_latest ADD COLUMN IF NOT EXISTS extras jsonb;
 
 -- OAuth tokens for platform connections (never exposed to Claude directly)
 CREATE TABLE IF NOT EXISTS integration_tokens (
