@@ -238,6 +238,13 @@ export default function App() {
   const [advisorLoading, setAdvisorLoading] = useState(false);
   const [checkedTodos,   setCheckedTodos]   = useState<Set<number>>(new Set());
 
+  // ── Chat ──
+  const [chatOpen,     setChatOpen]     = useState(false);
+  const [chatMessages, setChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [chatInput,    setChatInput]    = useState("");
+  const [chatLoading,  setChatLoading]  = useState(false);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     const [iR, lR, gR, pR, planR] = await Promise.all([
@@ -341,6 +348,52 @@ export default function App() {
     setTodayTodos(todos); setTodoGenerated(true); setAdvisorLoading(false);
   };
 
+  // ── Chat send ────────────────────────────────────────────────────────────
+  const sendChat = async () => {
+    const text = chatInput.trim();
+    if (!text || chatLoading) return;
+    const userMsg = { role: "user" as const, content: text };
+    const next = [...chatMessages, userMsg];
+    setChatMessages(next);
+    setChatInput("");
+    setChatLoading(true);
+
+    const context = {
+      profile,
+      goals: goals.slice(0, 10),
+      ideas: ideas.slice(0, 15).map(i => ({ ...i, score: opportunityScore(i.upside, i.downside, i.effort) })),
+      recentLogs: logs.slice(0, 7),
+      portfolioHealth: portfolioHealth(ideas),
+    };
+
+    try {
+      const res = await fetch("/api/advisor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: next, context }),
+      });
+      if (!res.body) throw new Error("no body");
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let full = "";
+      setChatMessages(m => [...m, { role: "assistant", content: "" }]);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        full += dec.decode(value, { stream: true });
+        setChatMessages(m => {
+          const copy = [...m];
+          copy[copy.length - 1] = { role: "assistant", content: full };
+          return copy;
+        });
+        chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
+    } catch {
+      setChatMessages(m => [...m, { role: "assistant", content: "Connection error. Check your API key in Vercel env vars." }]);
+    }
+    setChatLoading(false);
+  };
+
   // ── Derived ──────────────────────────────────────────────────────────────
   const health   = portfolioHealth(ideas);
   const insight  = getAdvisorInsight(ideas, profile, logs);
@@ -350,6 +403,26 @@ export default function App() {
   const chartData = [...logs].reverse().slice(-14).map(l => ({ date: l.date?.slice(5) ?? "", revenue: l.outcome_revenue ?? 0, followers: l.outcome_followers ?? 0 }));
   const bubbleData = ideas.map(i => ({ x: i.effort, y: i.upside, z: 10 - i.downside, name: i.title, category: i.category ?? "standard", score: opportunityScore(i.upside, i.downside, i.effort) }));
   const allAnswered = MORNING_QUESTIONS.every((_, i) => morningAnswers[i]?.trim());
+
+  // ── Strategy Alerts (Reasoning Engine) ───────────────────────────────────
+  const strategyAlerts: { level: "red" | "amber"; msg: string }[] = [];
+  {
+    const trapCount = ideas.filter(i => i.category === "trap").length;
+    const asymCount = ideas.filter(i => i.category === "asymmetric").length;
+    const behindGoals = goals.filter(g => {
+      if (!g.deadline) return false;
+      const v = calcVelocity(g);
+      return v.delta !== null && v.delta < -20;
+    });
+    if (trapCount > 0 && trapCount >= asymCount)
+      strategyAlerts.push({ level: "red", msg: `STRATEGY ALERT: ${trapCount} trap${trapCount > 1 ? "s" : ""} in your portfolio equal or outnumber your asymmetric bets. Cut them — every hour on a trap is an hour not compounding.` });
+    if (asymCount === 0 && ideas.length > 0)
+      strategyAlerts.push({ level: "amber", msg: `No asymmetric ideas in your portfolio. You're optimising inside a small box. Find a bet with 8+ upside and 3 or less downside.` });
+    if ((profile?.runway_months ?? 12) <= 2)
+      strategyAlerts.push({ level: "red", msg: `RUIN RISK: ${profile?.runway_months ?? 0} months runway. Revenue-only mode. Kill everything that doesn't pay.` });
+    if (behindGoals.length > 0)
+      strategyAlerts.push({ level: "amber", msg: `${behindGoals.length} goal${behindGoals.length > 1 ? "s" : ""} behind pace by >20%. Either accelerate output or update the target — a goal you don't believe is just noise.` });
+  }
 
   // Content velocity for goals
   const totalContentUnits = logs.filter(l => ["content","marketing","building"].includes(l.output_type ?? "")).reduce((s, l) => s + (l.output_quantity ?? 0), 0);
@@ -465,6 +538,14 @@ export default function App() {
               <p style={{ fontSize: 14, color: DIM, marginTop: 8 }}>{insight}</p>
             </div>
 
+            {/* Strategy Alerts */}
+            {strategyAlerts.map((a, i) => (
+              <div key={i} style={{ padding: "14px 20px", borderRadius: 14, background: a.level === "red" ? `${P.red}15` : `${P.orange}15`, border: `1px solid ${a.level === "red" ? P.red : P.orange}40`, display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <span style={{ fontSize: 16, flexShrink: 0 }}>{a.level === "red" ? "🚨" : "⚠️"}</span>
+                <p style={{ fontSize: 13, fontWeight: 600, color: a.level === "red" ? P.red : P.orange, margin: 0, lineHeight: 1.6 }}>{a.msg}</p>
+              </div>
+            ))}
+
             {/* Insight banner */}
             <Card style={{ padding: "20px 24px", background: `linear-gradient(135deg, #2D0B6B, ${P.purple}CC)`, border: `1px solid ${P.purple}50`, boxShadow: `0 0 40px ${P.purple}20` }}>
               <p style={{ fontSize: 10, fontWeight: 800, color: P.violet, textTransform: "uppercase", letterSpacing: "0.1em", margin: "0 0 6px" }}>Today&apos;s Insight</p>
@@ -545,6 +626,10 @@ export default function App() {
                   <Slider label="Upside" value={ideaForm.upside} onChange={v => setIdeaForm(f => ({ ...f, upside: v }))} color={P.emerald} desc="How big is the potential reward?" />
                   <Slider label="Downside / Risk" value={ideaForm.downside} onChange={v => setIdeaForm(f => ({ ...f, downside: v }))} color={P.red} desc="How bad if it fails?" />
                   <Slider label="Effort" value={ideaForm.effort} onChange={v => setIdeaForm(f => ({ ...f, effort: v }))} color={P.orange} desc="Time and energy required" />
+                  <div>
+                    <SLabel>Pre-mortem — how does this fail?</SLabel>
+                    <textarea rows={2} style={{ ...inputSt, resize: "none", fontFamily: "inherit", borderColor: `${P.red}40` }} placeholder="Be brutally honest. What's the most likely reason this doesn't work?" value={(ideaForm as { pre_mortem?: string }).pre_mortem ?? ""} onChange={e => setIdeaForm(f => ({ ...f, pre_mortem: e.target.value } as typeof f & { pre_mortem: string }))} />
+                  </div>
                   {(() => {
                     const cat = categoriseIdea(ideaForm.upside, ideaForm.downside, ideaForm.effort);
                     const score = opportunityScore(ideaForm.upside, ideaForm.downside, ideaForm.effort);
@@ -913,6 +998,81 @@ export default function App() {
 
       {/* ── HUD floating rings ── */}
       <HUD todos={todayTodos} checked={checkedTodos} goals={goals} />
+
+      {/* ── Chat floating button ── */}
+      <button onClick={() => setChatOpen(o => !o)}
+        style={{ position: "fixed", bottom: 24, left: 24, zIndex: 50, width: 52, height: 52, borderRadius: "50%", border: "none", cursor: "pointer", background: `linear-gradient(135deg, ${P.purple}, ${P.violet})`, boxShadow: `0 4px 24px ${P.purple}60`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, transition: "transform 0.2s" }}
+        title="Advisor">
+        {chatOpen ? "✕" : "🧠"}
+      </button>
+
+      {/* ── Chat panel ── */}
+      {chatOpen && (
+        <div style={{ position: "fixed", bottom: 0, left: 0, top: 0, width: 420, zIndex: 49, display: "flex", flexDirection: "column", background: "rgba(7,7,26,0.97)", borderRight: `1px solid ${BORDER}`, backdropFilter: "blur(24px)", boxShadow: `4px 0 40px rgba(0,0,0,0.6)` }}>
+          {/* Header */}
+          <div style={{ padding: "20px 24px 16px", borderBottom: `1px solid ${BORDER}`, flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 10, background: `linear-gradient(135deg, ${P.purple}, ${P.violet})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, boxShadow: `0 0 16px ${P.purple}50` }}>🧠</div>
+              <div>
+                <p style={{ fontSize: 14, fontWeight: 800, color: TEXT, margin: 0 }}>Founder Advisor</p>
+                <p style={{ fontSize: 11, color: P.violet, margin: 0, fontWeight: 600 }}>Asymmetric Intelligence · Always objective</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Messages */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+            {chatMessages.length === 0 && (
+              <div style={{ padding: "24px 0", textAlign: "center" }}>
+                <p style={{ fontSize: 13, color: DIM, lineHeight: 1.7, margin: 0 }}>
+                  I know your portfolio, goals, and logs.<br />
+                  Ask me anything — I&apos;ll challenge bad ideas<br />and back asymmetric ones.
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 20 }}>
+                  {["What should I focus on today?", "Am I on track to hit my goals?", "What's the biggest risk in my portfolio?", "Where am I wasting time?"].map(q => (
+                    <button key={q} onClick={() => { setChatInput(q); }}
+                      style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${BORDER}`, borderRadius: 10, padding: "9px 14px", color: DIM, fontSize: 12, fontWeight: 600, cursor: "pointer", textAlign: "left", transition: "all 0.15s" }}>
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {chatMessages.map((m, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+                <div style={{
+                  maxWidth: "85%", padding: "11px 15px", borderRadius: m.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+                  background: m.role === "user" ? `linear-gradient(135deg, ${P.purple}CC, ${P.purple})` : "rgba(255,255,255,0.06)",
+                  border: `1px solid ${m.role === "user" ? P.purple + "60" : BORDER}`,
+                  fontSize: 13, color: TEXT, lineHeight: 1.65, whiteSpace: "pre-wrap",
+                }}>
+                  {m.content || <span style={{ color: DIM }}>▊</span>}
+                </div>
+              </div>
+            ))}
+            <div ref={chatBottomRef} />
+          </div>
+
+          {/* Input */}
+          <div style={{ padding: "12px 16px 20px", borderTop: `1px solid ${BORDER}`, flexShrink: 0 }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              <textarea
+                rows={2}
+                style={{ ...inputSt, flex: 1, resize: "none", fontFamily: "inherit", fontSize: 13 }}
+                placeholder="Ask anything about your strategy..."
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
+              />
+              <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()}
+                style={{ width: 44, borderRadius: 12, border: "none", background: chatLoading || !chatInput.trim() ? "rgba(255,255,255,0.06)" : `linear-gradient(135deg, ${P.purple}, ${P.violet})`, color: "#fff", cursor: chatLoading || !chatInput.trim() ? "not-allowed" : "pointer", fontSize: 18, flexShrink: 0, boxShadow: chatInput.trim() ? `0 4px 16px ${P.purple}40` : "none", transition: "all 0.15s" }}>
+                {chatLoading ? "…" : "↑"}
+              </button>
+            </div>
+            <p style={{ fontSize: 10, color: DIM, margin: "6px 0 0", textAlign: "center" }}>Shift+Enter for new line · Enter to send</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
