@@ -135,3 +135,84 @@ body {
 /* ── Streak fire ── */
 .streak-fire { display: inline-block; }
 .streak-fire.active { animation: streakBounce 0.6s ease; }
+
+/* ── Forza: floating orbs ── */
+@keyframes orbFloat1 {
+  0%,100% { transform: translate(0,0) scale(1); }
+  33%      { transform: translate(60px,-40px) scale(1.08); }
+  66%      { transform: translate(-30px,25px) scale(0.94); }
+}
+@keyframes orbFloat2 {
+  0%,100% { transform: translate(0,0) scale(1); }
+  33%      { transform: translate(-55px,35px) scale(1.05); }
+  66%      { transform: translate(40px,-25px) scale(0.96); }
+}
+@keyframes orbFloat3 {
+  0%,100% { transform: translate(0,0); }
+  50%      { transform: translate(35px,55px) scale(1.06); }
+}
+@keyframes orbFloat4 {
+  0%,100% { transform: translate(0,0); }
+  50%      { transform: translate(-45px,-35px) scale(0.92); }
+}
+.orb1 { animation: orbFloat1 12s ease-in-out infinite; }
+.orb2 { animation: orbFloat2 15s ease-in-out infinite; }
+.orb3 { animation: orbFloat3 10s ease-in-out infinite; }
+.orb4 { animation: orbFloat4 18s ease-in-out infinite; }
+
+/* ── Forza: onboarding step transitions ── */
+@keyframes stepIn  { from { transform:translateX(70px);  opacity:0; } to { transform:translateX(0);   opacity:1; } }
+@keyframes stepOut { from { transform:translateX(0);    opacity:1; } to { transform:translateX(-70px); opacity:0; } }
+.step-in  { animation: stepIn  0.4s cubic-bezier(0.16,1,0.3,1) forwards; }
+.step-out { animation: stepOut 0.3s cubic-bezier(0.4,0,1,1)    forwards; }
+
+/* ── Forza: cinematic ── */
+@keyframes logoBloom {
+  0%   { transform:scale(0) rotate(-15deg); opacity:0; filter:blur(20px); }
+  60%  { transform:scale(1.15) rotate(3deg); opacity:1; filter:blur(0); }
+  100% { transform:scale(1) rotate(0deg); opacity:1; }
+}
+@keyframes barFill   { from { width:0%; } }
+@keyframes textReveal { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
+@keyframes cinematicFade { to { opacity:0; } }
+.logo-bloom   { animation: logoBloom  0.9s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+.bar-fill     { animation: barFill    1.6s cubic-bezier(0.16,1,0.3,1)    forwards; }
+.text-reveal  { animation: textReveal 0.6s cubic-bezier(0.16,1,0.3,1)    forwards; }
+
+/* ── Forza: sidebar slide ── */
+@keyframes sidebarIn { from { transform:translateX(-100%); opacity:0; } to { transform:translateX(0); opacity:1; } }
+.sidebar-in { animation: sidebarIn 0.5s cubic-bezier(0.16,1,0.3,1) forwards; }
+
+/* ── Icon pulse glow ── */
+@keyframes iconGlow {
+  0%,100% { filter: drop-shadow(0 0 12px currentColor); }
+  50%      { filter: drop-shadow(0 0 28px currentColor) drop-shadow(0 0 50px currentColor); }
+}
+.icon-glow { animation: iconGlow 2.5s ease-in-out infinite; }
+
+/* ── Ring glow pulse ── */
+@keyframes ringPulse {
+  0%,100% { opacity:1; }
+  50%      { opacity:0.7; }
+}
+.ring-pulse { animation: ringPulse 2s ease-in-out infinite; }
+
+/* ── Number count up ── */
+@keyframes numIn { from { transform:translateY(8px); opacity:0; } to { transform:translateY(0); opacity:1; } }
+.num-in { animation: numIn 0.4s cubic-bezier(0.16,1,0.3,1) forwards; }
+
+/* ── Celebration flash ── */
+@keyframes celebFlash {
+  0%   { box-shadow: 0 0 0 0 rgba(255,215,0,0.8); }
+  70%  { box-shadow: 0 0 0 20px rgba(255,215,0,0); }
+  100% { box-shadow: 0 0 0 0 rgba(255,215,0,0); }
+}
+.celeb { animation: celebFlash 0.6s ease-out; }
+
+/* ── Mobile bottom nav ── */
+.mobile-nav { display: none; }
+@media (max-width: 768px) {
+  .desktop-sidebar { display: none !important; }
+  .mobile-nav { display: flex !important; }
+  .main-with-sidebar { padding-bottom: 72px !important; }
+}
