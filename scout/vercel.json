@@ -1,12 +1,1 @@
-{
-  "crons": [
-    {
-      "path": "/api/cron/youtube",
-      "schedule": "0 */6 * * *"
-    },
-    {
-      "path": "/api/cron/shopify",
-      "schedule": "0 */4 * * *"
-    }
-  ]
-}
+{}
