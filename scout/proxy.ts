@@ -4,7 +4,7 @@ import { createServerClient } from "@supabase/ssr";
 const PROTECTED = ["/app", "/onboarding"];
 const AUTH_ONLY = ["/login", "/signup", "/forgot-password"];
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   const isProtected = PROTECTED.some(p => pathname.startsWith(p));

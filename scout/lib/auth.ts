@@ -26,7 +26,7 @@ export async function getMembers(orgId: string): Promise<Member[]> {
     .select("*, profiles(name, avatar_color)")
     .eq("org_id", orgId)
     .order("created_at");
-  return (data ?? []).map((m: Record<string, unknown>) => ({ ...m, profile: m.profiles as Member["profile"] }));
+  return (data ?? []).map((m: Record<string, unknown>) => ({ ...m, profile: m.profiles as Member["profile"] })) as Member[];
 }
 
 export async function createOrg(name: string, userId: string): Promise<OrgRow | null> {
