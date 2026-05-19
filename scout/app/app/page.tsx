@@ -321,7 +321,16 @@ export default function App() {
 
   const generateTodo = async () => {
     setAdvisorLoading(true);
-    const todos = generateTodoFromIdeas(ideas, profile, morningAnswers);
+    let todos = generateTodoFromIdeas(ideas, profile, morningAnswers);
+    if (todos.length === 0) {
+      const win = morningAnswers[0]?.trim();
+      const avoiding = morningAnswers[1]?.trim();
+      todos = [
+        win ? { task: win, priority: "high", estimated_time: "2–4 hrs", category: "asymmetric" } : null,
+        avoiding ? { task: avoiding, priority: "high", estimated_time: "1–2 hrs", category: "standard" } : null,
+        { task: "Add your ideas to Idea Lab so tomorrow's plan is fully ranked", priority: "medium", estimated_time: "15 min", category: "standard" },
+      ].filter(Boolean) as typeof todos;
+    }
     const today = new Date().toISOString().split("T")[0];
     const ex = await supabase.from("daily_plans").select("id").eq("date", today).maybeSingle();
     if (ex.data?.id) {
@@ -481,8 +490,8 @@ export default function App() {
                 </div>
                 <div style={{ marginTop: 24 }}>
                   <SubmitBtn onClick={generateTodo} loading={advisorLoading}
-                    disabled={!allAnswered || ideas.length === 0}
-                    label={ideas.length === 0 ? "Add ideas in Idea Lab first" : !allAnswered ? "Answer all 5 questions to unlock" : "Generate my plan →"} />
+                    disabled={!allAnswered}
+                    label={!allAnswered ? "Answer all 5 questions to unlock" : "Generate my plan →"} />
                 </div>
               </Card>
             ) : (
