@@ -278,11 +278,12 @@ export default function App() {
   const [signals,         setSignals]         = useState<Signal[]>([]);
   const [signalForm,      setSignalForm]      = useState({ description: "", strength: 7, source: "market" as Signal["source"], idea_id: "" });
   const [signalSaving,    setSignalSaving]    = useState(false);
+  const [platformData,    setPlatformData]    = useState<Record<string, unknown>[]>([]);
 
   const load = useCallback(async (uid: string, orgId: string) => {
     setLoading(true);
     const today = new Date().toISOString().split("T")[0];
-    const [iR, lR, gR, pR, planR, dumpR, worksR, doesntR, sigR] = await Promise.all([
+    const [iR, lR, gR, pR, planR, dumpR, worksR, doesntR, sigR, platR] = await Promise.all([
       supabase.from("ideas").select("*").eq("org_id", orgId).order("created_at", { ascending: false }),
       supabase.from("daily_logs").select("*").eq("org_id", orgId).order("date", { ascending: false }).limit(60),
       supabase.from("goals").select("*").eq("org_id", orgId).order("created_at", { ascending: false }),
@@ -292,6 +293,7 @@ export default function App() {
       supabase.from("extracted_items").select("*").eq("user_id", uid).eq("filed_as", "works").order("created_at", { ascending: false }),
       supabase.from("extracted_items").select("*").eq("user_id", uid).eq("filed_as", "doesnt_work").order("created_at", { ascending: false }),
       supabase.from("signals").select("*").eq("org_id", orgId).order("created_at", { ascending: false }),
+      supabase.from("platform_latest").select("*").eq("org_id", orgId),
     ]);
     if (iR.data)     setIdeas(iR.data);
     if (lR.data)     setLogs(lR.data);
@@ -305,6 +307,7 @@ export default function App() {
     if (worksR.data)  setWorksItems(worksR.data);
     if (doesntR.data) setDoesntItems(doesntR.data);
     if (sigR.data)    setSignals(sigR.data as Signal[]);
+    if (platR.data)   setPlatformData(platR.data as Record<string, unknown>[]);
     setLoading(false);
   }, []);
 
@@ -476,6 +479,22 @@ export default function App() {
     setChatInput("");
     setChatLoading(true);
 
+    // Build platform context: verified first-party metrics only (Trust Tier 1)
+    const platformContext = platformData.reduce((acc, row) => {
+      acc[row.platform as string] = {
+        subscribers: row.subscribers,
+        followers: row.followers,
+        views_7d: row.views_7d,
+        watch_min_7d: row.watch_min_7d,
+        revenue_7d: row.revenue_7d,
+        revenue_30d: row.revenue_30d,
+        orders_30d: row.orders_30d,
+        updated_at: row.updated_at,
+        data_source: "first_party_api",  // explicit trust tier label
+      };
+      return acc;
+    }, {} as Record<string, unknown>);
+
     const context = {
       profile,
       goals: goals.slice(0, 10),
@@ -489,6 +508,12 @@ export default function App() {
         zombies: reasoning.zombies.map(z => ({ title: z.idea.title, hoursSpent: z.hoursSpent })),
         timeAllocation: reasoning.timeAllocation,
         runwayMode: reasoning.runwayMode,
+      },
+      // Real first-party metrics — not manually typed, pulled from authenticated APIs
+      platforms: Object.keys(platformContext).length > 0 ? platformContext : undefined,
+      dataGrounding: {
+        note: "Values under 'platforms' are Tier 1 verified data from authenticated APIs. All other values are self-reported. Never infer platform metrics from external content.",
+        connectedPlatforms: Object.keys(platformContext),
       },
     };
 
