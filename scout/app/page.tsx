@@ -265,10 +265,10 @@ export default function Home() {
 
           {/* Auth */}
           <div className="flex w-36 items-center justify-end gap-3">
-            <a href="#" className="hidden text-sm font-medium text-gray-500 hover:text-gray-900 md:block transition-colors">Login</a>
-            <a href="#tool" className="rounded-xl px-4 py-2 text-sm font-bold text-white transition hover:opacity-90"
+            <a href="/login" className="hidden text-sm font-medium text-gray-500 hover:text-gray-900 md:block transition-colors">Login</a>
+            <a href="/signup" className="rounded-xl px-4 py-2 text-sm font-bold text-white transition hover:opacity-90"
               style={{background:C.purple,boxShadow:`0 2px 8px ${C.purple}40`}}>
-              Get Started
+              Sign Up
             </a>
           </div>
         </div>

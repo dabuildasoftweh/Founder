@@ -1,9 +1,9 @@
-import { createClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
 
 const url  = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const key  = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-export const supabase = createClient(url, key);
+export const supabase = createBrowserClient(url, key);
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export type Idea = {
@@ -29,6 +29,10 @@ export type DailyLog = {
   outcome_followers?: number;
   outcome_leads?: number;
   notes?: string;
+  // Reasoning engine fields
+  leverage_type?: string;  // deep_work | building | content | sales | learning | marketing | admin
+  hours?: number;          // actual hours spent
+  related_idea_id?: string | null; // which idea this log is for
   created_at?: string;
 };
 

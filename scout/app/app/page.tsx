@@ -7,8 +7,10 @@ import {
 } from "recharts";
 import { useRouter } from "next/navigation";
 import { supabase, categoriseIdea, opportunityScore, kellyHours, portfolioHealth } from "@/lib/supabase";
-import { MORNING_QUESTIONS, generateTodoFromIdeas, getAdvisorInsight } from "@/lib/advisor";
+import { generateTodoFromIdeas, getAdvisorInsight } from "@/lib/advisor";
 import { getSession, getOrg, getMembers, getActivity, logActivity, inviteMember, createOrg } from "@/lib/auth";
+import { runReasoningEngine, getMorningQuestions, calculateAsymmetryScore, normalizedAsymmetryScore, signalToNoise, leverageWeight, LEVERAGE_MULTIPLIER } from "@/lib/reasoning";
+import type { Signal } from "@/lib/reasoning";
 import type { Idea, DailyLog, Goal, FounderProfile, TodoItem } from "@/lib/supabase";
 import type { OrgRow, Member } from "@/lib/auth";
 
@@ -241,7 +243,7 @@ export default function App() {
   const [ideaForm, setIdeaForm] = useState({ title: "", description: "", upside: 5, downside: 5, effort: 5 });
   const [ideaSaving, setIdeaSaving] = useState(false);
 
-  const [logForm, setLogForm] = useState({ output_type: "content", output_description: "", output_quantity: 1, output_unit: "hours", outcome_revenue: 0, outcome_followers: 0, notes: "" });
+  const [logForm, setLogForm] = useState({ output_type: "content", output_description: "", output_quantity: 1, output_unit: "hours", outcome_revenue: 0, outcome_followers: 0, notes: "", leverage_type: "content", hours: 1, related_idea_id: "" });
   const [logSaving, setLogSaving] = useState(false);
 
   const [goalForm, setGoalForm] = useState({ title: "", category: "revenue", target_value: 0, current_value: 0, unit: "£", deadline: "" });
@@ -273,19 +275,23 @@ export default function App() {
   const [savedDumps,      setSavedDumps]      = useState<Record<string, unknown>[]>([]);
   const [worksItems,      setWorksItems]      = useState<Record<string, unknown>[]>([]);
   const [doesntItems,     setDoesntItems]     = useState<Record<string, unknown>[]>([]);
+  const [signals,         setSignals]         = useState<Signal[]>([]);
+  const [signalForm,      setSignalForm]      = useState({ description: "", strength: 7, source: "market" as Signal["source"], idea_id: "" });
+  const [signalSaving,    setSignalSaving]    = useState(false);
 
   const load = useCallback(async (uid: string, orgId: string) => {
     setLoading(true);
     const today = new Date().toISOString().split("T")[0];
-    const [iR, lR, gR, pR, planR, dumpR, worksR, doesntR] = await Promise.all([
+    const [iR, lR, gR, pR, planR, dumpR, worksR, doesntR, sigR] = await Promise.all([
       supabase.from("ideas").select("*").eq("org_id", orgId).order("created_at", { ascending: false }),
-      supabase.from("daily_logs").select("*").eq("org_id", orgId).order("date", { ascending: false }).limit(30),
+      supabase.from("daily_logs").select("*").eq("org_id", orgId).order("date", { ascending: false }).limit(60),
       supabase.from("goals").select("*").eq("org_id", orgId).order("created_at", { ascending: false }),
       supabase.from("founder_profile").select("*").eq("user_id", uid).limit(1).maybeSingle(),
       supabase.from("daily_plans").select("*").eq("user_id", uid).eq("date", today).maybeSingle(),
       supabase.from("info_dumps").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(20),
       supabase.from("extracted_items").select("*").eq("user_id", uid).eq("filed_as", "works").order("created_at", { ascending: false }),
       supabase.from("extracted_items").select("*").eq("user_id", uid).eq("filed_as", "doesnt_work").order("created_at", { ascending: false }),
+      supabase.from("signals").select("*").eq("org_id", orgId).order("created_at", { ascending: false }),
     ]);
     if (iR.data)     setIdeas(iR.data);
     if (lR.data)     setLogs(lR.data);
@@ -298,6 +304,7 @@ export default function App() {
     if (dumpR.data)   setSavedDumps(dumpR.data);
     if (worksR.data)  setWorksItems(worksR.data);
     if (doesntR.data) setDoesntItems(doesntR.data);
+    if (sigR.data)    setSignals(sigR.data as Signal[]);
     setLoading(false);
   }, []);
 
@@ -336,7 +343,8 @@ export default function App() {
     if (!authUser || !org) return;
     setLogSaving(true);
     const date = new Date().toISOString().split("T")[0];
-    await supabase.from("daily_logs").insert({ ...logForm, date, user_id: authUser.id, org_id: org.id });
+    const logPayload = { ...logForm, date, user_id: authUser.id, org_id: org.id, related_idea_id: logForm.related_idea_id || null };
+    await supabase.from("daily_logs").insert(logPayload);
     if (logForm.outcome_revenue > 0) {
       await logActivity(org.id, authUser.id, "revenue_logged", "log", { amount: logForm.outcome_revenue });
       const revGoals = goals.filter(g => g.category === "revenue");
@@ -351,7 +359,7 @@ export default function App() {
         supabase.from("goals").update({ current_value: (g.current_value ?? 0) + logForm.outcome_followers }).eq("id", g.id!)
       ));
     }
-    setLogForm({ output_type: "content", output_description: "", output_quantity: 1, output_unit: "hours", outcome_revenue: 0, outcome_followers: 0, notes: "" });
+    setLogForm({ output_type: "content", output_description: "", output_quantity: 1, output_unit: "hours", outcome_revenue: 0, outcome_followers: 0, notes: "", leverage_type: "content", hours: 1, related_idea_id: "" });
     await load(authUser.id, org.id); setLogSaving(false);
   };
 
@@ -372,6 +380,16 @@ export default function App() {
   const deleteIdea = async (id: string) => {
     await supabase.from("ideas").delete().eq("id", id);
     setIdeas(prev => prev.filter(i => i.id !== id));
+  };
+
+  const saveSignal = async () => {
+    if (!signalForm.description.trim() || !authUser || !org) return;
+    setSignalSaving(true);
+    const payload: Signal = { ...signalForm, user_id: authUser.id, org_id: org.id, idea_id: signalForm.idea_id || undefined };
+    await supabase.from("signals").insert(payload);
+    setSignalForm({ description: "", strength: 7, source: "market", idea_id: "" });
+    await load(authUser.id, org.id);
+    setSignalSaving(false);
   };
 
   const saveProfile = async () => {
@@ -461,10 +479,17 @@ export default function App() {
     const context = {
       profile,
       goals: goals.slice(0, 10),
-      ideas: ideas.slice(0, 15).map(i => ({ ...i, score: opportunityScore(i.upside, i.downside, i.effort) })),
+      ideas: ideas.slice(0, 15).map(i => ({ ...i, score: opportunityScore(i.upside, i.downside, i.effort), asymmetryScore: calculateAsymmetryScore(i.upside, i.downside, i.effort) })),
       recentLogs: logs.slice(0, 7),
       portfolioHealth: portfolioHealth(ideas),
       libraryContext: worksItems.slice(0, 5).map(i => i.content).join("; ") || undefined,
+      signals: signals.slice(0, 10),
+      reasoning: {
+        alerts: reasoning.strategyAlerts.map(a => a.msg),
+        zombies: reasoning.zombies.map(z => ({ title: z.idea.title, hoursSpent: z.hoursSpent })),
+        timeAllocation: reasoning.timeAllocation,
+        runwayMode: reasoning.runwayMode,
+      },
     };
 
     try {
@@ -502,28 +527,29 @@ export default function App() {
   const totalRevenue   = logs.reduce((s, l) => s + (l.outcome_revenue ?? 0), 0);
   const totalFollowers = logs.reduce((s, l) => s + (l.outcome_followers ?? 0), 0);
   const chartData = [...logs].reverse().slice(-14).map(l => ({ date: l.date?.slice(5) ?? "", revenue: l.outcome_revenue ?? 0, followers: l.outcome_followers ?? 0 }));
-  const bubbleData = ideas.map(i => ({ x: i.effort, y: i.upside, z: 10 - i.downside, name: i.title, category: i.category ?? "standard", score: opportunityScore(i.upside, i.downside, i.effort) }));
-  const allAnswered = MORNING_QUESTIONS.every((_, i) => morningAnswers[i]?.trim());
 
-  // ── Strategy Alerts (Reasoning Engine) ───────────────────────────────────
-  const strategyAlerts: { level: "red" | "amber"; msg: string }[] = [];
-  {
-    const trapCount = ideas.filter(i => i.category === "trap").length;
-    const asymCount = ideas.filter(i => i.category === "asymmetric").length;
-    const behindGoals = goals.filter(g => {
-      if (!g.deadline) return false;
-      const v = calcVelocity(g);
-      return v.delta !== null && v.delta < -20;
-    });
-    if (trapCount > 0 && trapCount >= asymCount)
-      strategyAlerts.push({ level: "red", msg: `STRATEGY ALERT: ${trapCount} trap${trapCount > 1 ? "s" : ""} in your portfolio equal or outnumber your asymmetric bets. Cut them — every hour on a trap is an hour not compounding.` });
-    if (asymCount === 0 && ideas.length > 0)
-      strategyAlerts.push({ level: "amber", msg: `No asymmetric ideas in your portfolio. You're optimising inside a small box. Find a bet with 8+ upside and 3 or less downside.` });
-    if ((profile?.runway_months ?? 12) <= 2)
-      strategyAlerts.push({ level: "red", msg: `RUIN RISK: ${profile?.runway_months ?? 0} months runway. Revenue-only mode. Kill everything that doesn't pay.` });
-    if (behindGoals.length > 0)
-      strategyAlerts.push({ level: "amber", msg: `${behindGoals.length} goal${behindGoals.length > 1 ? "s" : ""} behind pace by >20%. Either accelerate output or update the target — a goal you don't believe is just noise.` });
-  }
+  // Leverage-weighted chart: show actual cognitive output, not raw hours
+  const leverageChartData = [...logs].reverse().slice(-14).map(l => ({
+    date: l.date?.slice(5) ?? "",
+    raw: l.hours ?? 0,
+    weighted: Math.round((l.hours ?? 0) * leverageWeight(l.leverage_type ?? l.output_type ?? "standard")),
+  }));
+
+  // Bubble chart: X=Effort, Y=Upside, Z=signal strength per idea
+  const bubbleData = ideas.map(i => {
+    const totalSignal = signals.filter(s => s.idea_id === i.id).reduce((sum, s) => sum + s.strength, 0);
+    return { x: i.effort, y: i.upside, z: Math.max(30, totalSignal * 40 + 30), name: i.title, category: i.category ?? "standard", score: opportunityScore(i.upside, i.downside, i.effort), asymScore: calculateAsymmetryScore(i.upside, i.downside, i.effort) };
+  });
+
+  // ── Reasoning Engine ─────────────────────────────────────────────────────
+  const reasoning = runReasoningEngine(ideas, logs, signals, goals, profile);
+
+  // Dynamic morning questions — Q2 names the top asymmetric idea specifically
+  const topIdea = ideas.length > 0
+    ? [...ideas].sort((a, b) => calculateAsymmetryScore(b.upside, b.downside, b.effort) - calculateAsymmetryScore(a.upside, a.downside, a.effort))[0]
+    : null;
+  const MORNING_QS = getMorningQuestions(topIdea?.title);
+  const allAnswered = MORNING_QS.every((_, i) => morningAnswers[i]?.trim());
 
   // Content velocity for goals
   const totalContentUnits = logs.filter(l => ["content","marketing","building"].includes(l.output_type ?? "")).reduce((s, l) => s + (l.output_quantity ?? 0), 0);
@@ -850,13 +876,49 @@ export default function App() {
               <p style={{ fontSize: 14, color: DIM, marginTop: 8 }}>{insight}</p>
             </div>
 
-            {/* Strategy Alerts */}
-            {strategyAlerts.map((a, i) => (
+            {/* Runway mode indicator */}
+            <div style={{ padding: "10px 18px", borderRadius: 12, background: `${reasoning.runwayLabel.color}15`, border: `1px solid ${reasoning.runwayLabel.color}35`, display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 11, fontWeight: 800, color: reasoning.runwayLabel.color, textTransform: "uppercase", letterSpacing: "0.08em", flexShrink: 0 }}>{reasoning.runwayLabel.label}</span>
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)" }}>{reasoning.runwayLabel.action}</span>
+              {reasoning.topRecommendation && <span style={{ marginLeft: "auto", fontSize: 11, color: reasoning.runwayLabel.color, fontWeight: 700, flexShrink: 0 }}>↑ {reasoning.topRecommendation}</span>}
+            </div>
+
+            {/* Strategy Alerts (Reasoning Engine) */}
+            {reasoning.strategyAlerts.map((a, i) => (
               <div key={i} style={{ padding: "14px 20px", borderRadius: 14, background: a.level === "red" ? `${P.red}15` : `${P.orange}15`, border: `1px solid ${a.level === "red" ? P.red : P.orange}40`, display: "flex", gap: 10, alignItems: "flex-start" }}>
                 <span style={{ fontSize: 16, flexShrink: 0 }}>{a.level === "red" ? "🚨" : "⚠️"}</span>
                 <p style={{ fontSize: 13, fontWeight: 600, color: a.level === "red" ? P.red : P.orange, margin: 0, lineHeight: 1.6 }}>{a.msg}</p>
               </div>
             ))}
+
+            {/* Zombie projects */}
+            {reasoning.zombies.length > 0 && (
+              <div style={{ padding: "18px 20px", borderRadius: 14, background: "rgba(139,92,246,0.08)", border: `1px solid ${P.violet}30` }}>
+                <p style={{ fontSize: 11, fontWeight: 800, color: P.violet, textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 10px" }}>🧟 Zombie Projects Detected</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {reasoning.zombies.map((z, i) => (
+                    <div key={i} style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                      <div style={{ flex: 1 }}>
+                        <p style={{ fontSize: 13, fontWeight: 700, color: TEXT, margin: 0 }}>{z.idea.title}</p>
+                        <p style={{ fontSize: 11, color: DIM, margin: 0 }}>{z.hoursSpent.toFixed(0)}h logged · 0 market signals · Signal/Noise = 0</p>
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 800, color: P.red, background: `${P.red}15`, border: `1px solid ${P.red}30`, borderRadius: 8, padding: "4px 10px" }}>Kill?</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Time allocation alert (persistent red if 80%+) */}
+            {reasoning.timeAllocation.isAlert && (
+              <div style={{ padding: "14px 20px", borderRadius: 14, background: `${P.red}20`, border: `2px solid ${P.red}60`, display: "flex", gap: 12, alignItems: "center" }}>
+                <span style={{ fontSize: 20 }}>⛔</span>
+                <div>
+                  <p style={{ fontSize: 13, fontWeight: 800, color: P.red, margin: "0 0 3px" }}>80% TIME MISALLOCATION</p>
+                  <p style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", margin: 0 }}>{reasoning.timeAllocation.pct.toFixed(0)}% of your {reasoning.timeAllocation.totalHours}h logged are on low-asymmetry bets (score &lt; 5). You are optimising inside the wrong box.</p>
+                </div>
+              </div>
+            )}
 
             {/* Insight banner */}
             <Card style={{ padding: "20px 24px", background: `linear-gradient(135deg, #2D0B6B, ${P.purple}CC)`, border: `1px solid ${P.purple}50`, boxShadow: `0 0 40px ${P.purple}20` }}>
@@ -870,7 +932,7 @@ export default function App() {
                 <h3 style={{ fontSize: 15, fontWeight: 800, margin: "0 0 6px" }}>Morning check-in</h3>
                 <p style={{ fontSize: 12, color: DIM, margin: "0 0 24px" }}>Answer honestly — this shapes your ranked to-do list.</p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                  {MORNING_QUESTIONS.map((q, i) => (
+                  {MORNING_QS.map((q, i) => (
                     <div key={i}>
                       <label style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
                         <span style={{ width: 22, height: 22, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: "#fff", flexShrink: 0, marginTop: 1, background: morningAnswers[i]?.trim() ? P.emerald : P.purple }}>{i + 1}</span>
@@ -996,34 +1058,92 @@ export default function App() {
 
             {ideas.length > 0 && (
               <Card style={{ padding: 28 }}>
-                <h3 style={{ fontSize: 14, fontWeight: 800, margin: "0 0 6px" }}>All Ideas — ranked by opportunity score</h3>
-                <p style={{ fontSize: 12, color: DIM, margin: "0 0 20px" }}>Score = (upside×2 − downside − effort×0.5) / 1.75 · Kelly = hrs/week to invest</p>
+                <h3 style={{ fontSize: 14, fontWeight: 800, margin: "0 0 6px" }}>All Ideas — ranked by asymmetry score</h3>
+                <p style={{ fontSize: 12, color: DIM, margin: "0 0 20px" }}>Asymmetry = (Upside×2) − (Downside×1.5) − (Effort×0.5) · Bubble size = signal strength</p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {[...ideas].sort((a, b) => opportunityScore(b.upside, b.downside, b.effort) - opportunityScore(a.upside, a.downside, a.effort)).map((idea, i) => {
+                  {[...ideas].sort((a, b) => calculateAsymmetryScore(b.upside, b.downside, b.effort) - calculateAsymmetryScore(a.upside, a.downside, a.effort)).map((idea, i) => {
                     const meta = CAT[idea.category ?? "standard"];
                     const score = opportunityScore(idea.upside, idea.downside, idea.effort);
+                    const asymScore = calculateAsymmetryScore(idea.upside, idea.downside, idea.effort);
+                    const normScore = normalizedAsymmetryScore(idea.upside, idea.downside, idea.effort);
                     const kelly = kellyHours(idea.upside, idea.downside, idea.effort);
+                    const ideaSignals = signals.filter(s => s.idea_id === idea.id);
+                    const totalSignal = ideaSignals.reduce((s, sig) => s + sig.strength, 0);
+                    const snRatio = idea.id ? signalToNoise(idea.id, logs, signals) : 0;
+                    const hoursLogged = logs.filter(l => l.related_idea_id === idea.id).reduce((s, l) => s + (l.hours ?? 0), 0);
                     return (
-                      <div key={idea.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: 14, background: i === 0 ? `${P.purple}12` : "rgba(255,255,255,0.03)", border: `1px solid ${i === 0 ? `${P.purple}40` : BORDER}` }}>
-                        <span style={{ width: 26, height: 26, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: "#fff", flexShrink: 0, background: i === 0 ? P.purple : "rgba(255,255,255,0.1)" }}>{i + 1}</span>
+                      <div key={idea.id} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "14px 16px", borderRadius: 14, background: i === 0 ? `${P.purple}12` : "rgba(255,255,255,0.03)", border: `1px solid ${i === 0 ? `${P.purple}40` : BORDER}` }}>
+                        <span style={{ width: 26, height: 26, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: "#fff", flexShrink: 0, marginTop: 2, background: i === 0 ? P.purple : "rgba(255,255,255,0.1)" }}>{i + 1}</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <p style={{ fontWeight: 700, color: TEXT, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{idea.title}</p>
-                          <div style={{ display: "flex", gap: 10, marginTop: 3, fontSize: 11, color: DIM }}>
+                          <div style={{ display: "flex", gap: 10, marginTop: 4, fontSize: 11, color: DIM, flexWrap: "wrap" }}>
                             <span style={{ color: P.emerald }}>↑{idea.upside}</span>
                             <span style={{ color: P.red }}>↓{idea.downside}</span>
                             <span style={{ color: P.orange }}>⚙{idea.effort}</span>
-                            <span style={{ color: P.cyan }}>Kelly: {kelly} hrs/wk</span>
+                            <span style={{ color: P.cyan }}>Kelly: {kelly}h/wk</span>
+                            {hoursLogged > 0 && <span style={{ color: DIM }}>⏱ {hoursLogged.toFixed(0)}h logged</span>}
+                            {totalSignal > 0 && <span style={{ color: P.emerald }}>📡 S/N: {snRatio.toFixed(2)}</span>}
+                            {hoursLogged > 0 && totalSignal === 0 && <span style={{ color: P.red }}>🧟 No signal</span>}
                           </div>
+                        </div>
+                        <div style={{ textAlign: "center", flexShrink: 0 }}>
+                          <div style={{ fontSize: 10, color: DIM, marginBottom: 2 }}>asym</div>
+                          <div style={{ fontSize: 14, fontWeight: 900, color: asymScore >= 5 ? P.emerald : asymScore >= 0 ? P.orange : P.red }}>{asymScore.toFixed(1)}</div>
                         </div>
                         <Badge label={meta.label} color={meta.color} />
                         <ScoreRing score={score} color={meta.color} size={40} />
-                        <button onClick={() => idea.id && deleteIdea(idea.id)} style={{ background: "none", border: "none", color: DIM, cursor: "pointer", fontSize: 16 }}>×</button>
+                        <button onClick={() => idea.id && deleteIdea(idea.id)} style={{ background: "none", border: "none", color: DIM, cursor: "pointer", fontSize: 16, marginTop: 2 }}>×</button>
                       </div>
                     );
                   })}
                 </div>
               </Card>
             )}
+            {/* Signal capture */}
+            <Card style={{ padding: 28 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 800, margin: "0 0 6px" }}>📡 Market Signal</h3>
+              <p style={{ fontSize: 12, color: DIM, margin: "0 0 18px", lineHeight: 1.6 }}>Log a signal from the market — customer feedback, competitor move, or real-world data. Signals feed the Signal/Noise ratio per idea and help identify zombies.</p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div><SLabel>Signal description</SLabel>
+                  <input style={inputSt} placeholder="e.g. 3 DMs asking when the fragrance launches" value={signalForm.description} onChange={e => setSignalForm(f => ({ ...f, description: e.target.value }))} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                  <div><SLabel>Strength (1–10)</SLabel>
+                    <input type="number" min={1} max={10} style={inputSt} value={signalForm.strength} onChange={e => setSignalForm(f => ({ ...f, strength: Math.min(10, Math.max(1, +e.target.value)) }))} />
+                  </div>
+                  <div><SLabel>Source</SLabel>
+                    <select style={{ ...inputSt, fontFamily: "inherit" }} value={signalForm.source ?? "market"} onChange={e => setSignalForm(f => ({ ...f, source: e.target.value as Signal["source"] }))}>
+                      {["market","customer","competitor","internal"].map(s => <option key={s} style={{ background: SURFACE }}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div><SLabel>Linked idea</SLabel>
+                    <select style={{ ...inputSt, fontFamily: "inherit" }} value={signalForm.idea_id} onChange={e => setSignalForm(f => ({ ...f, idea_id: e.target.value }))}>
+                      <option value="" style={{ background: SURFACE }}>— General signal —</option>
+                      {ideas.map(i => <option key={i.id} value={i.id} style={{ background: SURFACE }}>{i.title}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <SubmitBtn onClick={saveSignal} loading={signalSaving} disabled={!signalForm.description.trim()} label="Log signal →" color={P.cyan} />
+              </div>
+              {signals.length > 0 && (
+                <div style={{ marginTop: 20, borderTop: `1px solid ${BORDER}`, paddingTop: 16 }}>
+                  <p style={{ fontSize: 11, fontWeight: 800, color: DIM, textTransform: "uppercase", letterSpacing: "0.08em", margin: "0 0 10px" }}>Recent Signals</p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {signals.slice(0, 5).map((s, i) => {
+                      const linkedIdea = ideas.find(id => id.id === s.idea_id);
+                      return (
+                        <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 12px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: `1px solid ${BORDER}` }}>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: s.strength >= 7 ? P.emerald : s.strength >= 4 ? P.cyan : P.orange, background: `${s.strength >= 7 ? P.emerald : s.strength >= 4 ? P.cyan : P.orange}15`, borderRadius: 6, padding: "2px 7px" }}>{s.strength}/10</span>
+                          <p style={{ flex: 1, fontSize: 12, color: TEXT, margin: 0 }}>{s.description}</p>
+                          {linkedIdea && <span style={{ fontSize: 10, color: DIM, flexShrink: 0 }}>{linkedIdea.title.slice(0, 20)}</span>}
+                          <Badge label={s.source ?? "market"} color={P.violet} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </Card>
           </div>
         )}
 
@@ -1091,26 +1211,47 @@ export default function App() {
               <Card style={{ padding: 28 }}>
                 <h3 style={{ fontSize: 14, fontWeight: 800, margin: "0 0 20px" }}>Log today&apos;s output</h3>
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                    <div><SLabel>Type</SLabel>
-                      <select style={{ ...inputSt, fontFamily: "inherit" }} value={logForm.output_type} onChange={e => setLogForm(f => ({ ...f, output_type: e.target.value }))}>
-                        {["content","deep_work","sales","admin","learning","building","marketing"].map(t => <option key={t} style={{ background: SURFACE }}>{t}</option>)}
-                      </select>
+                  {/* Leverage type — the single most important field */}
+                  <div>
+                    <SLabel>Leverage type</SLabel>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                      {Object.entries(LEVERAGE_MULTIPLIER).map(([type, mult]) => (
+                        <button key={type} onClick={() => setLogForm(f => ({ ...f, leverage_type: type, output_type: type }))}
+                          style={{ padding: "8px 6px", borderRadius: 10, border: `1px solid ${logForm.leverage_type === type ? (mult >= 2 ? P.emerald : mult >= 1 ? P.cyan : P.red) + "80" : BORDER}`, background: logForm.leverage_type === type ? (mult >= 2 ? P.emerald : mult >= 1 ? P.cyan : P.red) + "18" : "transparent", cursor: "pointer", fontSize: 11, fontWeight: 800, color: logForm.leverage_type === type ? TEXT : DIM, transition: "all 0.1s" }}>
+                          <div style={{ fontSize: 9, color: logForm.leverage_type === type ? (mult >= 2 ? P.emerald : mult >= 1 ? P.cyan : P.red) : DIM, marginBottom: 2 }}>{mult}×</div>
+                          {type.replace("_", " ")}
+                        </button>
+                      ))}
                     </div>
-                    <div><SLabel>Unit</SLabel>
+                    {logForm.leverage_type && (
+                      <p style={{ fontSize: 11, color: DIM, marginTop: 5 }}>
+                        Leverage weight: <span style={{ color: LEVERAGE_MULTIPLIER[logForm.leverage_type] >= 2 ? P.emerald : LEVERAGE_MULTIPLIER[logForm.leverage_type] >= 1 ? P.cyan : P.red, fontWeight: 800 }}>{LEVERAGE_MULTIPLIER[logForm.leverage_type]}×</span>
+                        {" · "}Effective output: <span style={{ color: TEXT, fontWeight: 700 }}>{(logForm.hours * LEVERAGE_MULTIPLIER[logForm.leverage_type]).toFixed(1)} leverage-hours</span>
+                      </p>
+                    )}
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <div><SLabel>Hours spent</SLabel><input type="number" step={0.5} style={inputSt} value={logForm.hours} onChange={e => setLogForm(f => ({ ...f, hours: +e.target.value }))} /></div>
+                    <div><SLabel>Output unit</SLabel>
                       <select style={{ ...inputSt, fontFamily: "inherit" }} value={logForm.output_unit} onChange={e => setLogForm(f => ({ ...f, output_unit: e.target.value }))}>
                         {["hours","videos","posts","calls","tasks","pages"].map(u => <option key={u} style={{ background: SURFACE }}>{u}</option>)}
                       </select>
                     </div>
                   </div>
-                  <div><SLabel>What did you do?</SLabel><input style={inputSt} placeholder="e.g. Filmed 3 TikToks" value={logForm.output_description} onChange={e => setLogForm(f => ({ ...f, output_description: e.target.value }))} /></div>
-                  <div><SLabel>Quantity</SLabel><input type="number" style={inputSt} value={logForm.output_quantity} onChange={e => setLogForm(f => ({ ...f, output_quantity: +e.target.value }))} /></div>
+                  <div><SLabel>What did you do?</SLabel><input style={inputSt} placeholder="e.g. Filmed 3 TikToks for Brick Whips" value={logForm.output_description} onChange={e => setLogForm(f => ({ ...f, output_description: e.target.value }))} /></div>
+                  <div><SLabel>Linked idea (optional)</SLabel>
+                    <select style={{ ...inputSt, fontFamily: "inherit" }} value={logForm.related_idea_id} onChange={e => setLogForm(f => ({ ...f, related_idea_id: e.target.value }))}>
+                      <option value="" style={{ background: SURFACE }}>— Not linked to an idea —</option>
+                      {ideas.map(i => <option key={i.id} value={i.id} style={{ background: SURFACE }}>{i.title}</option>)}
+                    </select>
+                  </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                     <div><SLabel>Revenue (£)</SLabel><input type="number" style={inputSt} value={logForm.outcome_revenue} onChange={e => setLogForm(f => ({ ...f, outcome_revenue: +e.target.value }))} /></div>
                     <div><SLabel>New followers</SLabel><input type="number" style={inputSt} value={logForm.outcome_followers} onChange={e => setLogForm(f => ({ ...f, outcome_followers: +e.target.value }))} /></div>
                   </div>
-                  <div><SLabel>Notes</SLabel><textarea rows={2} style={{ ...inputSt, resize: "none", fontFamily: "inherit" }} placeholder="How did it feel?" value={logForm.notes} onChange={e => setLogForm(f => ({ ...f, notes: e.target.value }))} /></div>
-                  <p style={{ fontSize: 11, color: P.emerald, margin: 0 }}>⚡ Revenue + followers automatically update matching goals</p>
+                  <div><SLabel>Notes</SLabel><textarea rows={2} style={{ ...inputSt, resize: "none", fontFamily: "inherit" }} placeholder="How did it feel? Any signals from the market?" value={logForm.notes} onChange={e => setLogForm(f => ({ ...f, notes: e.target.value }))} /></div>
+                  <p style={{ fontSize: 11, color: P.emerald, margin: 0 }}>⚡ Revenue + followers auto-update goals · Leverage hours feed the Reasoning Engine</p>
                   <SubmitBtn onClick={saveLog} loading={logSaving} label="Log today →" color={P.emerald} />
                 </div>
               </Card>
@@ -1124,6 +1265,21 @@ export default function App() {
                   <h3 style={{ fontSize: 14, fontWeight: 800, margin: "0 0 16px" }}>Follower growth</h3>
                   {chartData.length === 0 ? <p style={{ fontSize: 13, color: DIM }}>No logs yet.</p>
                     : <ResponsiveContainer width="100%" height={130}><LineChart data={chartData}><CartesianGrid {...GRID} /><XAxis dataKey="date" tick={AXIS} axisLine={false} tickLine={false} /><YAxis tick={AXIS} axisLine={false} tickLine={false} /><Tooltip {...TOOLTIP} /><Line type="monotone" dataKey="followers" stroke={P.violet} strokeWidth={2} dot={{ r: 3, fill: P.violet }} name="Followers" /></LineChart></ResponsiveContainer>}
+                </Card>
+                <Card style={{ padding: 24 }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 800, margin: "0 0 4px" }}>Leverage Output (14d)</h3>
+                  <p style={{ fontSize: 11, color: DIM, margin: "0 0 16px" }}>Weighted hours · Deep Work = 3× · Admin = 0.5×</p>
+                  {leverageChartData.every(d => d.raw === 0) ? <p style={{ fontSize: 13, color: DIM }}>Log hours to see leverage data.</p>
+                    : <ResponsiveContainer width="100%" height={130}>
+                        <BarChart data={leverageChartData}>
+                          <CartesianGrid {...GRID} />
+                          <XAxis dataKey="date" tick={AXIS} axisLine={false} tickLine={false} />
+                          <YAxis tick={AXIS} axisLine={false} tickLine={false} />
+                          <Tooltip {...TOOLTIP} />
+                          <Bar dataKey="raw"      fill={DIM}      radius={[3,3,0,0]} name="Raw hours" />
+                          <Bar dataKey="weighted" fill={P.emerald} radius={[3,3,0,0]} name="Leverage hours" />
+                        </BarChart>
+                      </ResponsiveContainer>}
                 </Card>
                 {logs.length > 0 && (
                   <Card style={{ padding: 20 }}>

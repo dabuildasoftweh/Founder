@@ -121,7 +121,7 @@ export default function Signup() {
               </div>
               {error && <div style={{ fontSize: 13, color: "#EF4444", padding: "10px 14px", background: "rgba(239,68,68,0.1)", borderRadius: 10, border: "1px solid rgba(239,68,68,0.2)" }}>{error}</div>}
               <button onClick={createWorkspace} disabled={loading || !orgName.trim()}
-                style={{ width: "100%", border: "none", borderRadius: 12, padding: "13px 0", fontSize: 14, fontWeight: 800, color: "#fff", cursor: "pointer", opacity: loading || !orgName.trim() ? 0.5 : 1, background: `linear-gradient(135deg, ${GO}CC, ${GO}AA)`, boxShadow: `0 4px 20px ${GO}30`, color: "#1a1200", transition: "all 0.15s" }}>
+                style={{ width: "100%", border: "none", borderRadius: 12, padding: "13px 0", fontSize: 14, fontWeight: 800, color: "#1a1200", cursor: "pointer", opacity: loading || !orgName.trim() ? 0.5 : 1, background: `linear-gradient(135deg, ${GO}CC, ${GO}AA)`, boxShadow: `0 4px 20px ${GO}30`, transition: "all 0.15s" }}>
                 {loading ? "Creating workspace..." : "Create workspace →"}
               </button>
             </div>
