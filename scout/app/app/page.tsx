@@ -666,11 +666,24 @@ export default function App() {
           })}
         </nav>
 
-        {/* Bottom date */}
-        <div style={{ padding: "16px 20px", borderTop: `1px solid ${BORDER}` }}>
-          <p style={{ fontSize: 11, color: DIM, margin: 0 }}>
-            {new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" })}
-          </p>
+        {/* Bottom: integrations link + date */}
+        <div style={{ padding: "12px 10px 4px", borderTop: `1px solid ${BORDER}` }}>
+          <button
+            onClick={() => router.push("/app/integrations")}
+            style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 12, border: "none", cursor: "pointer", background: platformData.length > 0 ? `${P.emerald}15` : "rgba(255,255,255,0.03)", color: platformData.length > 0 ? P.emerald : DIM, fontWeight: 600, fontSize: 13, marginBottom: 4 }}
+          >
+            <span style={{ fontSize: 14 }}>🔌</span>
+            Data Connections
+            {platformData.length > 0
+              ? <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 800, color: P.emerald }}>{platformData.length} LIVE</span>
+              : <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: DIM }}>Connect</span>
+            }
+          </button>
+          <div style={{ padding: "8px 14px 12px" }}>
+            <p style={{ fontSize: 11, color: DIM, margin: 0 }}>
+              {new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" })}
+            </p>
+          </div>
         </div>
       </aside>
 
@@ -688,6 +701,11 @@ export default function App() {
             <span style={{ fontSize: 9, fontWeight: 700 }}>{t}</span>
           </button>
         ))}
+        <button onClick={() => router.push("/app/integrations")}
+          style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: "none", border: "none", cursor: "pointer", padding: "4px 8px", color: platformData.length > 0 ? P.emerald : DIM }}>
+          <span style={{ fontSize: 20 }}>🔌</span>
+          <span style={{ fontSize: 9, fontWeight: 700 }}>Data</span>
+        </button>
       </nav>
 
       {/* ── Main content ── */}
