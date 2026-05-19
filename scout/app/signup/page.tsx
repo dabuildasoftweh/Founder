@@ -30,8 +30,12 @@ export default function Signup() {
       options: { data: { name } },
     });
     if (err) { setError(err.message); setLoading(false); return; }
-    if (!data.user) { setError("Signup failed — try again"); setLoading(false); return; }
-    // Update profile name directly in case trigger doesn't fire instantly
+    // Supabase returns null user (no error) when email already exists and confirmation is on
+    if (!data.user || (data.user.identities && data.user.identities.length === 0)) {
+      setError("An account with this email already exists — sign in instead");
+      setLoading(false);
+      return;
+    }
     await supabase.from("profiles").upsert({ id: data.user.id, name });
     setLoading(false);
     setStep(2);
