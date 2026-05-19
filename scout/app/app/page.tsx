@@ -8,7 +8,7 @@ import {
 import { useRouter } from "next/navigation";
 import { supabase, categoriseIdea, opportunityScore, kellyHours, portfolioHealth } from "@/lib/supabase";
 import { generateTodoFromIdeas, getAdvisorInsight } from "@/lib/advisor";
-import { getSession, getOrg, getMembers, getActivity, logActivity, inviteMember, createOrg } from "@/lib/auth";
+import { getSession, getOrg, getMembers, getActivity, logActivity, inviteMember, createOrg, signOut } from "@/lib/auth";
 import { runReasoningEngine, getMorningQuestions, calculateAsymmetryScore, normalizedAsymmetryScore, signalToNoise, leverageWeight, LEVERAGE_MULTIPLIER } from "@/lib/reasoning";
 import type { Signal } from "@/lib/reasoning";
 import type { Idea, DailyLog, Goal, FounderProfile, TodoItem } from "@/lib/supabase";
@@ -709,7 +709,53 @@ export default function App() {
       </nav>
 
       {/* ── Main content ── */}
-      <main className="main-with-sidebar fade-up" style={{ flex: 1, overflowY: tab === "Advisor" ? "hidden" : "auto", padding: tab === "Advisor" ? 0 : "36px 40px", minWidth: 0, display: "flex", flexDirection: "column" }}>
+      <main className="main-with-sidebar fade-up" style={{ flex: 1, overflowY: tab === "Advisor" ? "hidden" : "auto", minWidth: 0, display: "flex", flexDirection: "column" }}>
+
+        {/* ── Global top bar ── */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, padding: "10px 20px", borderBottom: `1px solid ${BORDER}`, background: "rgba(7,7,26,0.6)", backdropFilter: "blur(12px)", flexShrink: 0, zIndex: 10 }}>
+          {/* Platform live indicators */}
+          {platformData.length > 0 && platformData.map((p) => (
+            <div key={p.platform as string} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 20, background: `${P.emerald}12`, border: `1px solid ${P.emerald}30` }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", background: P.emerald }} />
+              <span style={{ fontSize: 11, fontWeight: 700, color: P.emerald, textTransform: "capitalize" }}>{p.platform as string}</span>
+              {(p.platform as string) === "shopify" && p.revenue_30d != null && (
+                <span style={{ fontSize: 11, color: P.emerald }}>£{Number(p.revenue_30d).toLocaleString()}</span>
+              )}
+              {(p.platform as string) === "youtube" && p.subscribers != null && (
+                <span style={{ fontSize: 11, color: P.emerald }}>{Number(p.subscribers).toLocaleString()} subs</span>
+              )}
+            </div>
+          ))}
+
+          {/* Nav links */}
+          {([
+            { label: "Advisor",   icon: "🧠", action: () => setTab("Advisor") },
+            { label: "Today",     icon: "🎯", action: () => setTab("Today") },
+            { label: "Idea Lab",  icon: "💡", action: () => setTab("Idea Lab") },
+            { label: "Overview",  icon: "📊", action: () => setTab("Overview") },
+            { label: "Goals",     icon: "🏆", action: () => setTab("Goals") },
+          ] as { label: Tab; icon: string; action: () => void }[]).map(({ label, icon, action }) => (
+            <button key={label} onClick={action}
+              style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", borderRadius: 8, border: "none", cursor: "pointer", background: tab === label ? `${P.purple}25` : "transparent", color: tab === label ? TEXT : DIM, fontWeight: tab === label ? 700 : 500, fontSize: 12, transition: "all 0.15s" }}>
+              <span>{icon}</span>{label}
+            </button>
+          ))}
+
+          <div style={{ width: 1, height: 18, background: BORDER, margin: "0 4px" }} />
+
+          <button onClick={() => router.push("/app/integrations")}
+            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", borderRadius: 8, border: `1px solid ${platformData.length > 0 ? P.emerald + "40" : BORDER}`, cursor: "pointer", background: platformData.length > 0 ? `${P.emerald}10` : "transparent", color: platformData.length > 0 ? P.emerald : DIM, fontWeight: 600, fontSize: 12 }}>
+            🔌 {platformData.length > 0 ? "Data Live" : "Connect Data"}
+          </button>
+
+          <button onClick={async () => { await signOut(); router.push("/login"); }}
+            style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 12px", borderRadius: 8, border: "none", cursor: "pointer", background: "transparent", color: DIM, fontSize: 12, fontWeight: 500 }}>
+            Sign out
+          </button>
+        </div>
+
+        {/* Tab content — pad non-advisor tabs below the top bar */}
+        <div style={{ flex: 1, overflowY: tab === "Advisor" ? "hidden" : "auto", padding: tab === "Advisor" ? 0 : "36px 40px", display: "flex", flexDirection: "column" }}>
 
         {/* ═══════ ADVISOR ═══════ */}
         {tab === "Advisor" && (
@@ -1588,6 +1634,7 @@ export default function App() {
           </div>
         )}
 
+        </div>{/* end tab content wrapper */}
       </main>
 
       {/* ── HUD floating rings ── */}
