@@ -497,7 +497,7 @@ export default function App() {
                     const done = checkedTodos.has(i);
                     const meta = CAT[t.category ?? "standard"];
                     return (
-                      <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "14px 18px", borderRadius: 14, background: done ? "rgba(255,255,255,0.02)" : i === 0 ? `${P.purple}18` : "rgba(255,255,255,0.04)", border: `1px solid ${done ? BORDER : i === 0 ? `${P.purple}45` : BORDER}`, boxShadow: i === 0 && !done ? `0 0 20px ${P.purple}18` : "none", opacity: done ? 0.4 : 1, transition: "all 0.2s", className: done ? "celeb" : "" }}>
+                      <div key={i} className={done ? "celeb" : ""} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "14px 18px", borderRadius: 14, background: done ? "rgba(255,255,255,0.02)" : i === 0 ? `${P.purple}18` : "rgba(255,255,255,0.04)", border: `1px solid ${done ? BORDER : i === 0 ? `${P.purple}45` : BORDER}`, boxShadow: i === 0 && !done ? `0 0 20px ${P.purple}18` : "none", opacity: done ? 0.4 : 1, transition: "all 0.2s" }}>
                         <input type="checkbox" checked={done} onChange={() => setCheckedTodos(prev => { const s = new Set(prev); s.has(i) ? s.delete(i) : s.add(i); return s; })} style={{ marginTop: 3, accentColor: P.purple, cursor: "pointer" }} />
                         <div style={{ flex: 1 }}>
                           <p style={{ fontSize: 13, fontWeight: 700, color: TEXT, margin: 0, textDecoration: done ? "line-through" : "none" }}>{t.task}</p>
