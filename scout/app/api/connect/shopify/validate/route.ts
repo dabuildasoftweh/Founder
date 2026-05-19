@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createServerClient } from "@supabase/ssr";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -15,6 +16,15 @@ function shopifyFetch(domain: string, token: string, path: string) {
 }
 
 export async function POST(req: NextRequest) {
+  // Verify the caller is an authenticated user
+  const authClient = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { cookies: { getAll: () => req.cookies.getAll(), setAll: () => {} } }
+  );
+  const { data: { user } } = await authClient.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { domain, token, orgId } = await req.json();
   if (!domain || !token || !orgId) {
     return NextResponse.json({ error: "Missing fields" }, { status: 400 });
