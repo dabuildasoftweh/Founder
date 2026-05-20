@@ -134,6 +134,9 @@ export default function App() {
   const [sessionHistory, setSessionHistory] = useState<Array<{ date: string; summary: string; key_decisions: unknown[]; momentum: string }>>([]);
   const [openCommitments, setOpenCommitments] = useState<Array<Record<string, unknown>>>([]);
 
+  // ── Todo session tracking (viewId -> TodoItem for tasks added this session) ──
+  const sessionTasksRef = useRef<Map<number, TodoItem>>(new Map());
+
   // ── Info dump ──
   const [dumpText, setDumpText] = useState("");
   const [dumpEnergy, setDumpEnergy] = useState(7);
@@ -290,6 +293,64 @@ export default function App() {
     setSignalForm({ description: "", strength: 7, source: "market", idea_id: "" });
     await load(authUser.id, org.id);
     setSignalSaving(false);
+  };
+
+  // ── Todo persistence helpers ──────────────────────────────────────────────
+  const persistTodos = async (items: TodoItem[]) => {
+    if (!authUser) return;
+    const today = new Date().toISOString().split("T")[0];
+    const ex = await supabase.from("daily_plans").select("id").eq("user_id", authUser.id).eq("date", today).maybeSingle();
+    if (ex.data?.id) {
+      await supabase.from("daily_plans").update({ todo_items: items }).eq("id", ex.data.id);
+    } else {
+      await supabase.from("daily_plans").insert({ user_id: authUser.id, date: today, todo_items: items });
+    }
+    setTodayTodos(items);
+  };
+
+  const handleAddTask = async (taskData: { id: number; text: string; timeEstimate: string; category: string; group: string }) => {
+    const newItem: TodoItem = {
+      task: taskData.text,
+      priority: taskData.category === "Business" ? "high" : taskData.category === "Content" ? "medium" : "low",
+      estimated_time: taskData.timeEstimate,
+      category: taskData.category.toLowerCase(),
+    };
+    sessionTasksRef.current.set(taskData.id, newItem);
+    await persistTodos([...todayTodos, newItem]);
+  };
+
+  const handleToggleTask = async (taskId: number, done: boolean) => {
+    setCheckedTodos(prev => {
+      const next = new Set(prev);
+      if (done) next.add(taskId);
+      else next.delete(taskId);
+      return next;
+    });
+    // Done state is session-only for now; tasks themselves are persisted via add/delete
+  };
+
+  const handleDeleteTask = async (taskId: number) => {
+    let newTodos: TodoItem[];
+    if (taskId < 10000) {
+      // Pre-existing task identified by index
+      newTodos = todayTodos.filter((_, i) => i !== taskId);
+    } else {
+      // Task added this session — look it up by viewId
+      const sessionItem = sessionTasksRef.current.get(taskId);
+      if (sessionItem) {
+        newTodos = todayTodos.filter(t => t !== sessionItem);
+        sessionTasksRef.current.delete(taskId);
+      } else {
+        return; // nothing to do
+      }
+    }
+    // Also remove from checkedTodos
+    setCheckedTodos(prev => {
+      const next = new Set(prev);
+      next.delete(taskId);
+      return next;
+    });
+    await persistTodos(newTodos);
   };
 
   const saveProfile = async () => {
@@ -802,6 +863,9 @@ export default function App() {
                   contentStreak={userLevel.contentStreak}
                   loginStreak={userLevel.loginStreak}
                   todayXP={userLevel.todayXP}
+                  onAddTask={handleAddTask}
+                  onToggleTask={handleToggleTask}
+                  onDeleteTask={handleDeleteTask}
                 />
               </motion.div>
             )}
