@@ -1,0 +1,52 @@
+# Paste! — Product & Lifestyle Image Prompts (Nano-Banana)
+Palette: cream #FFF9EF · butter #F9E8B4 · honey #F3D389 · tomato #E34A33 · aluminium.
+Rule: generate tubes BLANK, comp the real Paste! logo on afterwards (AI mangles text on curved metal).
+Product shots: 1:1 for store, lifestyle: 4:5 for feed, 9:16 for reels/ads.
+
+---
+
+## PRODUCT (store / pack shots)
+
+### P1 — Hero pack shot (main product image)
+Studio product photograph, 1:1. A raw brushed aluminium toothpaste tube standing upright on a warm cream seamless background, blank tube with no text. Bright cheerful lighting: main soft key from upper left, plus a warm golden sun-toned rim light from the right edge giving the metal a honey glow down one side. One long soft warm shadow falling diagonally. True brushed-metal texture with faint vertical grain, one clean vertical highlight, hex-edge steel cap. Colour palette: cream background, golden warmth, cool silver metal. Medium format film character, fine grain, no digital sharpening, soft highlight rolloff so the metal never clips. Feels expensive, optimistic and sunny — premium but warm, never sterile or clinical.
+NEGATIVE: plastic tube, glossy plastic, text, lettering, logos, dark moody lighting, grey studio, pastel blue, lavender, sterile white, CGI perfect render, floating product, water splash, mint leaves, watermarks
+
+### P2 — Colour-pop poster shot (category/campaign image)
+Editorial product photograph, 1:1, shot on medium format film. A blank raw aluminium toothpaste tube leaning at a jaunty 15-degree angle against a small cream plinth, on a flat butter-yellow background that fills the whole frame. Hard direct sunlight from the upper right casting one long, crisp, graphic shadow across the yellow — bold sunny poster energy like a 1970s Penguin book cover. A tiny tomato-red vintage toothbrush lies at the base of the plinth as the only other object. Rich Kodak film colours: deep butter yellow, warm cream, one pop of tomato red, cool silver. Fine organic film grain, lifted blacks, no digital sharpening. Joyful, confident, collectible.
+NEGATIVE: text, lettering, logos, plastic tube, soft shadows, cluttered props, pastel blue, lavender, dark background, CGI look, watermarks
+
+### P3 — The letterbox moment (the promise made visible)
+Editorial photograph, 4:5, shot on medium format film. A blank raw aluminium toothpaste tube in a slim open cream-coloured cardboard mailer, caught mid-drop halfway through the brass letterbox slot of a cheerful front door painted warm tomato red, bright golden morning sunlight raking across the door's panels at 45 degrees, crisp warm shadows, a sliver of sunny street reflected in the letterbox brass. Rich warm film colours — red door, brass glow, silver metal, morning light. Fine organic film grain, lifted blacks, soft highlight rolloff. The feeling: a small good thing arriving. Optimistic, charming, British.
+NEGATIVE: text, lettering, logos, plastic packaging, gloomy weather, rain, night, dark hallway, CGI, watermarks
+
+### P4 — Flat-lay with the paste itself (formula shot)
+Overhead flat-lay photograph, 1:1, shot on medium format film. On a warm cream linen surface in bright window sunlight: a blank raw aluminium tube lying diagonally with a neat ribbon of smooth white toothpaste squeezed onto a tomato-red toothbrush beside it, one small sprig of fresh mint and a halved lemon at the frame edges for colour, crisp warm shadows from raking morning sun. The paste is matte, creamy and natural-looking — NOT foaming, NOT glossy blue gel. Palette: cream, silver, tomato red, fresh green, sunny yellow. Fine film grain, real textures — linen weave visible, brush bristles individually sharp, paste with slight natural matte surface. Warm, fresh, appetising, honest.
+NEGATIVE: text, logos, blue gel, sparkles, foam bubbles, glitter, plastic tube, clinical white, flat lighting, CGI smoothness, watermarks
+
+---
+
+## LIFESTYLE (ads / social — emotionally charged)
+
+### L1 — The doormat grin (relief/joy — the "never run out" emotion)
+Editorial photograph, 4:5 portrait, shot on medium format film. A handsome man in his late twenties with tousled brown hair, crouched at his front door in warm golden morning light, holding up a slim cream mailer he's just picked off the doormat with a genuine delighted grin — the face of someone whose toothpaste arrived the exact day the old tube died. He wears a mustard-yellow t-shirt, sunlight flooding the hallway behind him from the open door, warm honey and cream tones everywhere, a blank aluminium tube half-slid out of the mailer catching the sun. Photorealistic. Raking side-top light at 45 degrees reveals every pore as a 3D crater with its own micro-shadow. Shallow depth of field — critical sharpness on the face, gentle optical falloff at edges. Visible: individual pore openings with depth, vellus peach fuzz catching sidelight, natural sebum sheen (uneven, concentrated on convex surfaces), subsurface color variation (capillary flush, melanin gradients), micro-wrinkles between major features. Fine organic film grain throughout. Zero digital sharpening — all sharpness is optical. Lifted blacks. Soft highlight rolloff — sunlit skin never clips. No makeup, no retouching, no smoothing, no filters. The skin must look uncomfortably real — a dermatological study shot by a cinematographer. Warm 1970s Kodak colour, joyful editorial energy.
+NEGATIVE: airbrushed, smooth skin, uniform tone, beauty lighting, ring light, porcelain, digital sharpening halos, CGI, plastic, flat lighting, dark, gloomy, tired eyes, miserable expression, text, logos, watermarks
+
+### L2 — Sunny window brushing (the beautiful morning — brand hero)
+Editorial photograph, 4:5 portrait, shot on medium format film. A beautiful woman in her mid-twenties with dark hair loosely tied up, glowing olive-tan skin, brushing her teeth by a wide-open bathroom window flooded with golden morning sunlight — white tiles glowing warm, a small plant on the sill, sheer curtain moving in the breeze. She catches her own eye in a round mirror with the hint of a smile around the toothbrush, a modest natural amount of white foam on her lips — someone genuinely enjoying a slow sunny morning. A blank aluminium tube gleams on the clean sink edge, sun running down the metal. Golden sunlight rakes at 45 degrees, warm cream and soft yellow tones. Photorealistic. Raking side-top light at 45 degrees reveals every pore as a 3D crater with its own micro-shadow. Shallow depth of field — critical sharpness on her face. Visible: individual pore openings with depth, vellus peach fuzz catching sidelight, natural sebum sheen (uneven), subsurface color variation, micro-wrinkles between major features. Fine organic film grain throughout. Zero digital sharpening. Lifted blacks. Soft highlight rolloff. No makeup, no retouching, no smoothing, no filters. The skin must look uncomfortably real — a dermatological study shot by a cinematographer. Fresh, alive, warm editorial film photography.
+NEGATIVE: airbrushed, smooth skin, uniform tone, beauty lighting, ring light, porcelain, CGI, flat lighting, dark, gloomy, harsh flash, tired eyes, commercial foam explosion, text, logos, watermarks
+
+### L3 — The dead tube (comic fury — ad angle B, faceless = safe)
+Editorial photograph, 4:5, shot on medium format film. Extreme close-up of two hands in bright morning bathroom light, knuckles white, desperately strangling and rolling a mangled, twisted, scrolled-up generic white plastic toothpaste tube — the universal end-of-tube death grip, played for comedy. The tube is crumpled, creased, squeezed flat, cap crusted, clearly generic with no brand visible. Bright cheerful sunlit bathroom behind — the comedy is the contrast between the sunny morning and the tiny domestic rage. Visible hand skin texture: knuckle creases, fine hairs catching sidelight, real tension in the tendons. Warm film colours, fine organic grain, lifted blacks, no digital sharpening. Funny, instantly recognisable, emotionally charged — everyone has been this person.
+NEGATIVE: text, brand names, logos, blood, anger that reads as violence, dark moody light, gloomy bathroom, airbrushed hands, CGI, watermarks
+
+### L4 — The grin macro (teeth/joy — beauty-adjacent proof)
+Extreme macro photograph, 1:1. Lips, teeth and chin in a genuine relaxed smile, mouth slightly open. Sun-warmed light beige skin with golden undertones. Clean bright healthy teeth with real enamel translucency at the biting edges, one lower incisor very slightly crooked in a charming natural way, a single tiny clean fleck of white toothpaste at the corner of the smile, vertical lip texture lines, light freckles on the chin, fine vellus peach fuzz glowing in warm sunlight, soft warm cream and golden colour wash background like a sunlit wall. Photorealistic, shot on medium format film. Raking side-top light at 45 degrees — warm golden morning sun — reveals every pore as a 3D crater with its own micro-shadow. Shallow depth of field — critical sharpness in the center, gentle optical falloff at edges. Visible: individual pore openings with depth, vellus peach fuzz catching sidelight, natural sebum sheen (uneven, concentrated on convex surfaces), subsurface color variation (veins, capillary flush, melanin gradients), micro-wrinkles between major features. Fleck of toothpaste at lip corner rendered with full physical accuracy — casting micro-shadow, distinct texture from surrounding skin. Skin fills 85% of frame. Fine organic film grain throughout. Zero digital sharpening — all sharpness is optical. Lifted blacks — shadow detail preserved inside every pore. Soft highlight rolloff — specular sheen never clips. No makeup, no retouching, no smoothing, no filters. The skin must look uncomfortably real — a dermatological study shot by a cinematographer. Warm, fresh, joyful.
+NEGATIVE: airbrushed, smooth skin, uniform tone, beauty lighting, ring light, porcelain, veneers, perfect hollywood teeth, symmetrical pore patterns, CGI, flat lighting, dark, gloomy, text, logos, watermarks
+
+---
+
+## Usage notes
+- Run P1/P2/P4 + L4 at 1:1, P3 + L1/L2/L3 at 4:5 (re-run L1/L3 at 9:16 for reels).
+- Comp the real Paste! wordmark onto blank tubes afterwards — tomato version on light shots, black version if a shot ever goes high-contrast.
+- If anything comes out too polished/plastic: append "amateur framing, slightly imperfect composition" and regenerate.
+- AI people = ads-clearly-staged + moodboard only. Real humans for anything implying testimony (receipts rule).
